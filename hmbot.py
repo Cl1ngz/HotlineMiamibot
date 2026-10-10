@@ -1,4 +1,5 @@
 import os
+import time
 
 GAME_NAME = "hotline"
 
@@ -59,6 +60,7 @@ if start is None:
     print("Couldn't find the game file in memory bruh")
     raise SystemExit
 print(f"game file {os.path.basename(path)} at {hex(start)}")
+# print(f"game file {path} at {hex(start)}")
 
 try:
     mem = os.open(f"/proc/{pid}/mem", os.O_RDONLY)
@@ -81,3 +83,45 @@ else:
     bits = "unknown"
 # if this shit show up mem reding work
 print(f"Game is {bits}-bit")
+
+
+def writable_regions(pid, game_path):
+    regions = []
+    with open(f"/proc/{pid}/maps") as f:
+        for line in f:
+            parts = line.split(None, 5)
+            if not parts[1].startswith("rw"):
+                continue
+            path = parts[5].strip() if len(parts) == 6 else ""
+            if path not in ("", "[heap]", game_path):
+                continue
+            start, end = (int(x, 16) for x in parts[0].split("-"))
+            regions.append((start, end))
+    return regions
+
+
+regions = writable_regions(pid, path)
+total_size = sum(end - start for start, end in regions)
+print(f"Found {len(regions)} writable regions")
+print(f"Total writable size: {total_size / 1024 / 1024:.2f} MB")
+
+
+def take_snapshot(mem, regions):
+    snapshot = {}
+    for start, end in regions:
+        try:
+            snapshot[start] = os.pread(mem, end - start, start)
+        except OSError:
+            print(f"Could not read memory region {hex(start)}-{hex(end)}")
+            continue
+
+    return snapshot
+
+
+t = time.time()
+snapshot = take_snapshot(mem, regions)
+took = time.time() - t
+
+print("Regions readed: ", len(snapshot))
+print("how many mb was: ", sum(len(data) for data in snapshot.values()) / 1024 / 1024)
+print(f"Snapshot took {took:.2f} seconds")
