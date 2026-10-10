@@ -3,7 +3,13 @@ import time
 
 import numpy as np
 
-from memory import find_game, find_game_file, take_snapshot, writable_regions
+from memory import (
+    find_game,
+    find_game_file,
+    read_double,
+    take_snapshot,
+    writable_regions,
+)
 
 GAME_NAME = "hotline"
 
@@ -78,7 +84,6 @@ before = take_snapshot(mem, regions)
 input("Walk RIGHT a bit in the game, then come back here and press Enter...")
 after = take_snapshot(mem, regions)
 
-total = 0
 candidates = {}
 for start in before:
     if start not in after or len(before[start]) != len(after[start]):
@@ -88,10 +93,25 @@ for start in before:
     went_up = b > a
     looks_ok = (np.abs(b) > 0.01) & (np.abs(b) < 100000)
     both = went_up & looks_ok
-    # total += np.count_nonzero(both)
-    # candidates[address] = the value after walking (b at position i)
     for i in np.flatnonzero(both):
-        candidates[start + i * 8] = b[i]
+        candidates[start + int(i) * 8] = b[i]
 
 print(len(candidates), "candidates found")
-# print(f"Total numbers that went up: {total}")
+
+for address, value in list(candidates.items())[:10]:
+    print(hex(address), value)
+
+
+input("Now walk LEFT, then press Enter...")
+for address, old in list(candidates.items())[:5]:
+    print(hex(address), "old:", old, "new:", read_double(mem, address))
+new_candidates = {}
+for address, old in candidates.items():
+    try:
+        new = read_double(mem, address)
+    except OSError:
+        continue
+    if new < old:
+        new_candidates[address] = new
+candidates = new_candidates
+print(len(candidates), "left after walking left")
