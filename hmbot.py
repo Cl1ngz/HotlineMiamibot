@@ -49,8 +49,35 @@ def find_game_file(pid, exe, wine):
             if len(parts) < 6:
                 continue
             path = parts[5].strip()
-
+            if wine and path.lower().endswith(".exe") and GAME_NAME in path.lower():
+                return int(parts[0].split("-")[0], 16), path
     return None, None
 
 
 start, path = find_game_file(pid, exe, wine)
+if start is None:
+    print("Couldn't find the game file in memory bruh")
+    raise SystemExit
+print(f"game file {os.path.basename(path)} at {hex(start)}")
+
+try:
+    mem = os.open(f"/proc/{pid}/mem", os.O_RDONLY)
+except PermissionError:
+    print("ERROR run: sudo sysctl kernel.yama.ptrace_scope=0")
+    raise SystemExit
+
+header = os.pread(mem, 0x200, start)  # read 512 bytes at that address
+print("First bytes there:", header[:4])
+
+# linux native
+if header[:4] == b"\x7fELF":
+    bits = 32 if header[4] == 1 else 64
+# Windows or proton
+elif header[:2] == b"MZ":
+    pe = int.from_bytes(header[0x3C:0x40], "little")
+    magic = int.from_bytes(os.pread(mem, 2, start + pe + 24), "little")
+    bits = 32 if magic == 0x10B else 64
+else:
+    bits = "unknown"
+# if this shit show up mem reding work
+print(f"Game is {bits}-bit")
