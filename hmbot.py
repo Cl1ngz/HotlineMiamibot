@@ -6,6 +6,7 @@ import numpy as np
 from memory import (
     find_game,
     find_game_file,
+    narrow,
     read_double,
     take_snapshot,
     writable_regions,
@@ -74,44 +75,12 @@ print("Regions readed: ", len(snapshot))
 print("how many mb was: ", sum(len(data) for data in snapshot.values()) / 1024 / 1024)
 print(f"Snapshot took {took:.2f} seconds")
 
-
-# for data in snapshot.values():
-#     numbers = np.frombuffer(data, dtype="<f8")
-#     print(np.count_nonzero(numbers))
-#     print(numbers[1000:1020])
-
-before = take_snapshot(mem, regions)
-input("Walk RIGHT a bit in the game, then come back here and press Enter...")
-after = take_snapshot(mem, regions)
-
 candidates = {}
-for start in before:
-    if start not in after or len(before[start]) != len(after[start]):
-        continue
-    a = np.frombuffer(before[start], dtype="<f8")
-    b = np.frombuffer(after[start], dtype="<f8")
-    went_up = b > a
-    looks_ok = (np.abs(b) > 0.01) & (np.abs(b) < 100000)
-    both = went_up & looks_ok
-    for i in np.flatnonzero(both):
-        candidates[start + int(i) * 8] = b[i]
-
-print(len(candidates), "candidates found")
-
-for address, value in list(candidates.items())[:10]:
-    print(hex(address), value)
-
-
-input("Now walk LEFT, then press Enter...")
-for address, old in list(candidates.items())[:5]:
-    print(hex(address), "old:", old, "new:", read_double(mem, address))
-new_candidates = {}
-for address, old in candidates.items():
-    try:
-        new = read_double(mem, address)
-    except OSError:
-        continue
-    if new < old:
-        new_candidates[address] = new
-candidates = new_candidates
-print(len(candidates), "left after walking left")
+for r in range(3):
+    input("Walk RIGHT, then press Enter...")
+    candidates = narrow(mem, candidates, "up")
+    input("Walk LEFT, then press Enter...")
+    candidates = narrow(mem, candidates, "down")
+    input("Stand STILL, then press Enter...")
+    candidates = narrow(mem, candidates, "same")
+    print(f"round {r + 1}: {len(candidates)} left")

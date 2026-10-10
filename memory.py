@@ -1,5 +1,7 @@
 import os
 
+import numpy as np
+
 GAME_NAME = "hotline"
 
 
@@ -66,3 +68,30 @@ def take_snapshot(mem, regions):
             continue
 
     return snapshot
+
+
+# read 8 bvtes at adres trun doble and return
+def read_double(mem, address):
+    data = os.pread(mem, 8, address)
+    return np.frombuffer(data, dtype="<f8")[0]
+
+
+def narrow(mem, candidates, how):
+    new_candidates = {}
+    match how:
+        case "up":
+            for addr, old in candidates.items():
+                new = read_double(mem, addr)
+                if new > old:
+                    new_candidates[addr] = new
+        case "down":
+            for addr, old in candidates.items():
+                new = read_double(mem, addr)
+                if new < old:
+                    new_candidates[addr] = new
+        case "same":
+            for addr, old in candidates.items():
+                new = read_double(mem, addr)
+                if new == old:
+                    new_candidates[addr] = new
+    return new_candidates
