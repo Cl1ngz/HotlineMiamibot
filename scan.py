@@ -3,7 +3,17 @@ import json
 import math
 from collections import Counter
 
-from memory import attach, first_scan, narrow, pointer_scan, read_double, take_snapshot
+from memory import (
+    attach,
+    first_scan,
+    narrow,
+    nearby,
+    pointer_scan,
+    read_double,
+    safe_read,
+    save_address,
+    take_snapshot,
+)
 
 mem, regions, static_regions = attach()
 
@@ -25,25 +35,12 @@ for r in range(2):
 for a, v in candidates.items():
     print(hex(a), round(v, 1))
 
-
 # y
-def safe_read(address):
-    try:
-        return read_double(mem, address)
-    except OSError:
-        return math.nan
-
-
-def nearby(x_addr):
-    # look in range(-64, 72, 8)
-    return {off: safe_read(x_addr + off) for off in range(-0x40, 0x48, 8)}
-
-
-start = {a: nearby(a) for a in candidates}
+start = {a: nearby(mem, a) for a in candidates}
 input("Walk DOWN (no left/right), then press Enter...")
-down = {a: nearby(a) for a in candidates}
+down = {a: nearby(mem, a) for a in candidates}
 input("Walk UP (no left/right), then press Enter...")
-up = {a: nearby(a) for a in candidates}
+up = {a: nearby(mem, a) for a in candidates}
 
 
 counts = Counter(round(v, 1) for v in candidates.values())
@@ -73,8 +70,9 @@ if best is None:
     raise SystemExit
 
 print(f"\n>>> FOUND YOU: X at {hex(best)}, Y at {hex(best + y_offset)}")
-print("\n! Put this line in hmbot.py:")
-print(f">>> Y_OFFSET = {hex(y_offset)}")
+save_address("y_offset", y_offset)
+# print("\n! Put this line in hmbot.py:")
+# print(f">>> Y_OFFSET = {hex(y_offset)}")
 
 #  find the game's note that says where you
 # print(">>> Looking for pointer paths to you...")
@@ -88,4 +86,4 @@ with open("paths.json", "w") as f:
 if paths:
     print(">>> NEXT: restart the level and run: python check.py")
 else:
-    print("!!! 0 paths. GG i so done idk jump out of a windo or something")
+    print("!!! 0 paths. GG i so done idk jump out of a wino or something")

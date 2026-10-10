@@ -1,10 +1,18 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
+import json
 import os
+import subprocess
 import time
 
 import numpy as np
 
+TABLE_START = 0xBEB900  # the game's object table is around here (you: 0xBEC91C, crosshair: 0xBECBD8)
+TABLE_END = 0xBED900
+X_OFF = 0x50  # every object keeps its X here...
+Y_OFF = 0x58  # ...and its Y here
+
 GAME_NAME = "hotline"
+ADDRESS_FILE = "addresses.json"
 
 
 def find_game():
@@ -75,6 +83,8 @@ def take_snapshot(mem, regions):
 # read 8 bvtes at adres trun doble and return
 def read_double(mem, address):
     data = os.pread(mem, 8, address)
+    if len(data) < 8:
+        raise OSError(f"can't read {hex(address)}")
     return np.frombuffer(data, dtype="<f8")[0]
 
 
@@ -99,9 +109,9 @@ def narrow(mem, candidates, how):
     return new_candidates
 
 
-def first_scan(mem, regions, prompt):
+def first_scan(mem, regions, prompt, ask=input):
     before = take_snapshot(mem, regions)
-    input(prompt)
+    ask(prompt)
     after = take_snapshot(mem, regions)
 
     candidates = {}
@@ -200,7 +210,95 @@ def pointer_scan(heap, static, target):
 
 def wait(text, seconds=4):
     print(text)
+    subprocess.run(["notify-send", "-t", str(seconds * 1000), "HMBot", text])
     for s in range(seconds, 0, -1):
         print(f"  {s}...", end="\r", flush=True)
         time.sleep(1)
     print("  scanning!")
+
+
+def safe_read(mem, address):
+    try:
+        return read_double(mem, address)
+    except OSError:
+        return math.nan
+
+
+def nearby(mem, x_addr):
+    # look in range(-64, 72, 8)
+    return {off: safe_read(mem, x_addr + off) for off in range(-0x40, 0x48, 8)}
+
+
+def save_address(name, value):
+    """Store a path [..] or a number under `name` in addresses.json (as hex text)."""
+    data = {}
+    if os.path.exists(ADDRESS_FILE):
+        with open(ADDRESS_FILE) as f:
+            data = json.load(f)
+    data[name] = [hex(v) for v in value] if isinstance(value, list) else hex(value)
+    with open(ADDRESS_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+
+def load_address(name):
+    """Read one entry back from addresses.json (hex text -> numbers)."""
+    with open(ADDRESS_FILE) as f:
+        value = json.load(f)[name]
+    return [int(v, 16) for v in value] if isinstance(value, list) else int(value, 16)
+
+
+def table_objects(mem):
+    # Every object in the game's object table: {table entry address: (x, y)}.
+    data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
+    objects = {}
+    for i in range(0, len(data) - 3, 4):
+        ptr = int.from_bytes(data[i : i + 4], "little")
+        if ptr == 0:
+            continue
+        try:
+            x = read_double(mem, ptr + X_OFF)
+            y = read_double(mem, ptr + Y_OFF)
+        except OSError:
+            continue
+        if 0.01 < abs(x) < 100000 and 0.01 < abs(y) < 100000:
+            objects[TABLE_START + i] = (x, y)
+    return objects
+
+
+def moved(before, after):
+    # Table entries whose position changed between two looks.
+    return {e for e in before if e in after and before[e] != after[e]}
+
+
+def auto_setup(mem):
+    wait("Stand still, hands off", 5)
+    a = table_objects(mem)
+    wait("Move the MOUSE somewhere else (don't walk)")
+    b = table_objects(mem)
+    mouse = moved(a, b)
+    wait("WALK a bit (don't touch the mouse)")
+    c = table_objects(mem)
+    walk = moved(b, c)
+    # moves when you walk, NOT when you move the mouse
+    players = walk - mouse
+    print(f"objects in table: {len(a)}")
+    print(f"moved with mouse: {[hex(e) for e in sorted(mouse)]}")
+    print(f"moved with walking: {[hex(e) for e in sorted(walk)]}")
+    print(f"known entries seen? you: {0xBEC91C in a}, crosshair: {0xBECBD8 in a}")
+    if not players or not mouse:
+        raise SystemExit(
+            "Setup failed: couldn't tell you and the crosshair apart. Run it again."
+        )
+    player = min(players)
+    wait("Put the cursor ON your character and hold it there", 5)
+    d = table_objects(mem)
+    if player not in d:
+        raise SystemExit("Setup failed: lost the player. Run it again.")
+    px, py = d[player]
+    crosshair = min(
+        mouse & d.keys(), key=lambda e: abs(d[e][0] - px) + abs(d[e][1] - py)
+    )
+    save_address("player", [player, X_OFF])
+    save_address("crosshair", [crosshair, X_OFF])
+    save_address("y_offset", Y_OFF - X_OFF)
+    print(f">>> player = {hex(player)}, crosshair = {hex(crosshair)}  (saved)")

@@ -13,4 +13,4 @@ print(len(paths), "pointer paths found")
 
 with open("paths.json", "w") as f:
     json.dump(paths, f)
-print("Saved. Now press R in the game (restart the level), then run: python check.py")
+print("Saved restart the level,  run: check.py")

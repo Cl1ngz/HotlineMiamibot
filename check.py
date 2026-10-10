@@ -3,7 +3,7 @@ import json
 import os
 import sys
 
-from memory import attach, follow, read_double, wait
+from memory import attach, follow, read_double, save_address, wait
 
 filename = sys.argv[1] if len(sys.argv) > 1 else "paths.json"
 if not os.path.exists(filename):
@@ -47,7 +47,13 @@ with open("good_paths.json", "w") as f:
     json.dump(paths, f)
 
 if paths:
-    print("\n>>> DONE! Put this line in hmbot.py:")
-    print("PLAYER = [" + ", ".join(hex(v) for v in paths[0]) + "]")
+    best = min(
+        paths, key=lambda p: sum(p[1:])
+    )  # the most direct path = smallest offsets
+    print("\n>>> Best path: [" + ", ".join(hex(v) for v in best) + "]")
+    name = input("Save as (player / crosshair, empty = don't save): ").strip()
+    if name:
+        save_address(name, best)
+        print(f">>> saved as '{name}' in addresses.json")
 else:
-    print("!!! paths are dead. GG i so done idk jump out of a windo or something")
+    print("!!! paths are dead. Run scan.py again.")
