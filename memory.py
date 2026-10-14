@@ -1,5 +1,6 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
 import json
+import math
 import os
 import subprocess
 import time
@@ -302,3 +303,28 @@ def auto_setup(mem):
     save_address("crosshair", [crosshair, X_OFF])
     save_address("y_offset", Y_OFF - X_OFF)
     print(f">>> player = {hex(player)}, crosshair = {hex(crosshair)}  (saved)")
+
+
+# Same as table_objects, but keyed by the object itself instead of its seat (seats get shuffled).
+def table_records(mem):
+    """Every object in the table: {record address: (x, y)}."""
+    data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
+    records = {}
+    for i in range(0, len(data) - 3, 4):
+        record = int.from_bytes(data[i : i + 4], "little")
+        if record == 0:
+            continue
+        try:
+            x = read_double(mem, record + X_OFF)
+            y = read_double(mem, record + Y_OFF)
+        except OSError:
+            continue
+        if 0.01 < abs(x) < 100000 and 0.01 < abs(y) < 100000:
+            records[record] = (x, y)
+    return records
+
+
+# where 0 = inside the record, 1 = inside the bigger object the record's first pointer leads to.
+def read_kind(mem, record, where, offset):
+    base = record if where == 0 else read_u32(mem, record)
+    return read_u32(mem, base + offset)
