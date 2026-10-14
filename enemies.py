@@ -1,13 +1,38 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
 # telling enemies apart from walls, you and everything else
+import math
 import os
 from collections import defaultdict
 
-from memory import X_OFF, load_address, read_kind, save_address
+from memory import X_OFF, load_address, read_kind, save_address, table_records
 
 RECORD = 0xB8  # bytes in a table record (X at +0x50, Y at +0x58)
 INSTANCE = 0x6D0  # bytes in the bigger object behind the record's first pointer
 MAX_ENEMIES = 40  # a floor never has more enemies of one kind than this
+
+
+def find_me(mem):
+    found = []
+    for record, (x, y) in table_records(mem).items():
+        if read_kind(mem, record, 0, 0x14) == 0x2C:
+            found.append((x, y))
+    if len(found) == 1:
+        return found[0]
+    else:
+        return None
+
+
+def find_aim(mem, me):
+    found = []
+    for record, (x, y) in table_records(mem).items():
+        if read_kind(mem, record, 0, 0x14) == 0xAF:
+            found.append((x, y))
+    if len(found) == 0:
+        return None
+    if len(found) == 1 or me is None:
+        return found[0]
+    closest = min(found, key=lambda pos: math.dist(pos, me))
+    return closest
 
 
 # [(kind rule, check), ...] - filled in by load_rules(), used by is_enemy()

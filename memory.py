@@ -15,6 +15,10 @@ Y_OFF = 0x58  # ...and its Y here
 GAME_NAME = "hotline"
 ADDRESS_FILE = "addresses.json"
 
+# experimen find_me.py
+PLAYER_KIND = 0x2C  # hides when dead
+AIM_KIND = 0xAF  # closer is the one
+
 
 def find_game():
     best = None

@@ -16,17 +16,14 @@ import sys
 import cairo
 import gi
 
+from enemies import find_aim, find_me
+
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
 from enemies import is_enemy, load_rules  # noqa: E402
-from memory import (
-    attach,
-    follow,
-    load_address,
-    read_double,  # noqa: E402
-    table_records,
-)
+from memory import read_double  # noqa: E402
+from memory import attach, follow, load_address, table_records
 from walls import can_see, find_walls, wall_lines  # noqa: E402
 
 SIZE = 400  # radar size on screen, in pixels
@@ -68,14 +65,20 @@ def on_draw(widget, cr):
     cr.set_font_size(13)
 
     try:
-        you = read_xy(PLAYER)
-        aim = read_xy(CROSSHAIR)
+        # you = read_xy(PLAYER)
+        # aim = read_xy(CROSSHAIR)
+        you = find_me(mem)
+        aim = find_aim(mem, you)
         objects = table_records(mem)  # {record: (x, y)}
-    except OSError:
+        if you is None:
+            raise OSError("no playerfound")
+        if aim is None:
+            raise OSError("no crosshair found")
+    except OSError as err:
         bounds, start_positions = None, set()  # forget the old level
         cr.set_source_rgb(1, 1, 1)
         cr.move_to(MARGIN, MARGIN + 13)
-        cr.show_text("not in a level")
+        cr.show_text(str(err))
         return
 
     # keep only objects near you (drops the odd garbage value far away)
