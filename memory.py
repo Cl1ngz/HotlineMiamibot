@@ -9,8 +9,10 @@ import numpy as np
 
 TABLE_START = 0xBEB900  # the game's object table is around here (you: 0xBEC91C, crosshair: 0xBECBD8)
 TABLE_END = 0xBED900
-X_OFF = 0x50  # every object keeps its X here...
-Y_OFF = 0x58  # ...and its Y here
+X_OFF = 0x50  # starts at 0x50 it takes 8 bytes
+Y_OFF = (
+    0x58  # 8 bytes offset because the game stores X and Y as doubles and x took 8 bytes
+)
 
 GAME_NAME = "hotline"
 ADDRESS_FILE = "addresses.json"

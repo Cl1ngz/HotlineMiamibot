@@ -2,37 +2,100 @@
 # telling enemies apart from walls, you and everything else
 import math
 import os
+import time
 from collections import defaultdict
 
-from memory import X_OFF, load_address, read_kind, save_address, table_records
+from memory import (
+    X_OFF,
+    Y_OFF,
+    load_address,
+    read_double,
+    read_kind,
+    save_address,
+    table_records,
+)
 
-RECORD = 0xB8  # bytes in a table record (X at +0x50, Y at +0x58)
+# Size of one table record
+# 4bytes (X at +0x50, Y at +0x58)
+RECORD = 0xB8
 INSTANCE = 0x6D0  # bytes in the bigger object behind the record's first pointer
 MAX_ENEMIES = 40  # a floor never has more enemies of one kind than this
 
 
 def find_me(mem):
+    cards = table_records(mem)
+    if not cards:
+        return None
     found = []
-    for record, (x, y) in table_records(mem).items():
-        if read_kind(mem, record, 0, 0x14) == 0x2C:
-            found.append((x, y))
+    # 64 cards is jsut a guess resonable number to compute
+    # thats why try exept is here cus fricking errors
+    for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
+        try:
+            if (
+                read_kind(mem, card, 0, 0x14) == 0x2C
+                and read_kind(mem, card, 1, 0x10) == 0x47
+            ):
+                found.append(
+                    (read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF))
+                )
+        except OSError:
+            # empty space this card reserve probobly causes it
+            continue
+    # menu or loading
+    if not found:
+        return None
     if len(found) == 1:
         return found[0]
-    else:
+
+    # more that one you
+    # closes to the crosshair is the real one i guess
+    aims = []
+    for card, xy in cards.items():
+        try:
+            if read_kind(mem, card, 0, 0x14) == 0xAF:
+                aims.append(xy)
+        except OSError:
+            continue
+    if not aims:
         return None
+    return min(found, key=lambda me: min(math.dist(me, aim) for aim in aims))
 
 
+# Crosshair card where it was last time checked
+aim_last_xy = {}
+# croshair card when last time moved
+aim_last_move = {}
+
+
+# card +0x14 = 0xAF  Or  folder +0x10 = 0xA5
 def find_aim(mem, me):
-    found = []
-    for record, (x, y) in table_records(mem).items():
-        if read_kind(mem, record, 0, 0x14) == 0xAF:
-            found.append((x, y))
-    if len(found) == 0:
+    cards = table_records(mem)
+    if not cards:
         return None
-    if len(found) == 1 or me is None:
-        return found[0]
-    closest = min(found, key=lambda pos: math.dist(pos, me))
-    return closest
+    aims = {}
+    for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
+        try:
+            if (
+                read_kind(mem, card, 0, 0x14) == 0xAF
+                and read_kind(mem, card, 1, 0x10) == 0xA5
+            ):
+                aims[card] = (
+                    read_double(mem, card + X_OFF),
+                    read_double(mem, card + Y_OFF),
+                )
+        except OSError:
+            continue
+    if not aims:
+        return None
+    now = time.monotonic()
+    for card, xy in aims.items():
+        # new card or it moved
+        if aim_last_xy.get(card) != xy:
+            aim_last_move[card] = now
+        aim_last_xy[card] = xy
+    # last to move
+    best = max(aims, key=lambda card: aim_last_move[card])
+    return aims[best]
 
 
 # [(kind rule, check), ...] - filled in by load_rules(), used by is_enemy()

@@ -2,7 +2,7 @@ import math
 import time
 
 from enemies import find_aim, find_me
-from memory import attach, read_kind, table_records
+from memory import attach, read_double, read_kind, table_records
 
 mem, regions, static_regions = attach()
 
@@ -32,28 +32,26 @@ mem, regions, static_regions = attach()
 
 
 while True:
-    objects = table_records(mem)
-    ile_mnie = 0
-    ile_celownikow = 0
-    for record, (x, y) in objects.items():
+    cards = table_records(mem)
+    if not cards:  # menu / ładowanie: spis pusty
+        print("menu")
+        time.sleep(0.5)
+        continue
+    lo, hi = min(cards), max(cards)  # pierwsza i ostatnia karta ze spisu
+    found = []
+    for card in range(
+        lo - 64 * 0xB8, hi + 64 * 0xB8, 0xB8
+    ):  # każde miejsce na półce, co 0xB8
         try:
-            if read_kind(mem, record, 1, 0x10) == 0x47:
-                plus_18 = read_kind(mem, record, 1, 0x18)
-                plus_80 = read_kind(mem, record, 1, 0x80)
-                print(
-                    "  0x47:",
-                    hex(record),
-                    "na",
-                    round(x),
-                    round(y),
-                    "  +0x18:",
-                    hex(plus_18),
-                    "  +0x80:",
-                    hex(plus_80),
+            if ...:  # DZIURA: podpis gracza - oba warunki, tak jak w is_player
+                found.append(
+                    (
+                        hex(card),
+                        round(read_double(mem, card + 0x50)),
+                        round(read_double(mem, card + 0x58)),
+                    )
                 )
         except OSError:
             continue
-    print("---")
-    # time.sleep(0.5)
-    # print("obiektów:", len(objects), "  ja:", ile_mnie, "  celowników:", ile_celownikow)
-    # time.sleep(0.5)
+    print(found)
+    time.sleep(0.5)

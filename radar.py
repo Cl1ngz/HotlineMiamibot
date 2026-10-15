@@ -89,8 +89,10 @@ def on_draw(widget, cr):
     }
 
     # first frame of a level: remember where everything is, and how big the level is
-    if bounds is None:
-        start_positions = set(objects.values())
+    now_positions = set(objects.values())
+    # first frame of level or new floor (less than half of the objects are where they were): start over
+    if bounds is None or len(now_positions & start_positions) < len(now_positions) / 2:
+        start_positions = now_positions
         bounds = [you[0], you[1], you[0], you[1]]
     for x, y in list(objects.values()) + [you, aim]:
         bounds = [
