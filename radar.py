@@ -45,7 +45,7 @@ rules = load_rules()  # what counts as an enemy (made by obj_kinds.py)
 
 
 def read_xy(path):
-    """Follow a saved path and read X, Y (Y sits Y_OFFSET bytes after X)."""
+    # Follow a saved path and read X, Y (Y sits Y_OFFSET bytes after X).
     x_addr = follow(mem, path)
     x, y = read_double(mem, x_addr), read_double(mem, x_addr + Y_OFFSET)
     if not (0.01 < abs(x) < 100000 and 0.01 < abs(y) < 100000):

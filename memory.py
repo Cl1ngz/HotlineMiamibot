@@ -237,7 +237,7 @@ def nearby(mem, x_addr):
 
 
 def save_address(name, value):
-    """Store a path [..] or a number under `name` in addresses.json (as hex text)."""
+    # Store a path [..] or a number under `name` in addresses.json (as hex text).
     data = {}
     if os.path.exists(ADDRESS_FILE):
         with open(ADDRESS_FILE) as f:
@@ -248,7 +248,7 @@ def save_address(name, value):
 
 
 def load_address(name):
-    """Read one entry back from addresses.json (hex text -> numbers)."""
+    # Read one entry back from addresses.json (hex text -> numbers).
     with open(ADDRESS_FILE) as f:
         value = json.load(f)[name]
     return [int(v, 16) for v in value] if isinstance(value, list) else int(value, 16)

@@ -22,7 +22,7 @@ PLACES = ("record", "object")  # where 0 = record, 1 = object
 
 
 def under_crosshair(mem, you, aim):
-    """Look at the table once: (records right under the crosshair, every object's position)."""
+    # Look at the table once: (records right under the crosshair, every object's position).
     objects = table_records(mem)
     if aim not in objects:
         raise SystemExit(
@@ -43,7 +43,7 @@ def under_crosshair(mem, you, aim):
 
 
 def people(mem, you, aim):
-    """Aim at two enemies -> guesses."""
+    ##Aim at two enemies -> guesses.
     wait("Aim at an ENEMY and keep the crosshair on it", 6)
     first, before = under_crosshair(mem, you, aim)
     wait("Now aim at a DIFFERENT enemy", 6)
@@ -59,7 +59,7 @@ def people(mem, you, aim):
 
 
 def dogs(mem, you, aim):
-    """Stand still -> whatever moves by itself and isn't an enemy yet -> guesses."""
+    # Stand still -> whatever moves by itself and isn't an enemy yet -> guesses.
     rules = load_rules()
     wait("Stand still and DON'T touch the mouse - watching for 3 seconds", 5)
     before = table_records(mem)
@@ -84,7 +84,7 @@ def dogs(mem, you, aim):
 
 
 def dead(mem, you, aim):
-    """Aim at a body that's still orange -> spots where every living enemy agrees and the body doesn't."""
+    # Aim at a body that's still orange -> spots where every living enemy agrees and the body doesn't.
     rules = load_rules()
     wait("Aim at the DEAD body that's still orange on the radar", 6)
     under, objects = under_crosshair(mem, you, aim)
