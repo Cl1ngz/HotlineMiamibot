@@ -1,3 +1,3 @@
-*.json
+enemy_guesses.json
 **/__pycache__/
 

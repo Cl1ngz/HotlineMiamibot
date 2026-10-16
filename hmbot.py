@@ -6,7 +6,7 @@ from memory import attach, auto_setup, follow, load_address, read_double
 
 
 def addresses_work(mem):
-    """True if addresses.json exists and both paths lead to real positions."""
+    # True if addresses.json exists and both paths lead to real positions.
     try:
         for name in ("player", "crosshair"):
             x = read_double(mem, follow(mem, load_address(name)))
