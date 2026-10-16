@@ -18,7 +18,7 @@ mem, regions, static_regions = attach()
 #         return None
 #
 #
-# def find_aim(mem, me):
+# def find_aim(mem):
 #     found = []
 #     for record, (x, y) in table_records(mem).items():
 #         if read_kind(mem, record, 0, 0x14) == 0xAF:

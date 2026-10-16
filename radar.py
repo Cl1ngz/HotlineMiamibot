@@ -68,7 +68,7 @@ def on_draw(widget, cr):
         # you = read_xy(PLAYER)
         # aim = read_xy(CROSSHAIR)
         you = find_me(mem)
-        aim = find_aim(mem, you)
+        aim = find_aim(mem)
         objects = table_records(mem)  # {record: (x, y)}
         if you is None:
             raise OSError("no playerfound")

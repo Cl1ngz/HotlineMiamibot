@@ -13,15 +13,13 @@ import time
 import numpy as np
 
 import fakemouse
-from enemies import is_enemy, load_rules
+from enemies import find_aim, find_me, is_enemy, load_rules
 from memory import (
     TABLE_END,
     TABLE_START,
     X_OFF,
     Y_OFF,
     attach,
-    follow,
-    load_address,
     read_double,
     table_records,
 )
@@ -41,9 +39,6 @@ MAX_STEP = 80
 FPS = 60
 
 mem, regions, static_regions = attach()
-PLAYER = load_address("player")
-CROSSHAIR = load_address("crosshair")
-Y_OFFSET = load_address("y_offset")
 rules = load_rules()
 if not rules:
     raise SystemExit("no enemy rules yet - run python obj_kinds.py first")
@@ -63,14 +58,6 @@ def game_focused():
     return "hotline" in name or "219150" in name  # 219150 = the game's Steam id
 
 
-def read_xy(path):
-    x_addr = follow(mem, path)
-    x, y = read_double(mem, x_addr), read_double(mem, x_addr + Y_OFFSET)
-    if not (0.01 < abs(x) < 100000 and 0.01 < abs(y) < 100000):
-        raise OSError("garbage position")  # menu / loading screen
-    return x, y
-
-
 # Every record the table points to right now (one quick read: 'is this object still alive?').
 def objects_in_table():
     data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
@@ -79,15 +66,24 @@ def objects_in_table():
 
 # Nudge the fake mouse and watch the crosshair: how many game units is one mouse count?
 def calibrate():
+    # warm up cus bug where max (x,x) so we cloud not find out correct one
+    find_aim(mem)
+    fakemouse.move(20, 0)
+    time.sleep(0.1)
+
+    find_aim(mem)
+    fakemouse.move(-20, 0)
+    time.sleep(0.1)
+
     scales = []
     for dx, dy in ((100, 0), (0, 100)):
-        before = read_xy(CROSSHAIR)
+        before = find_aim(mem)
         # 5 small moves, like a hand would do it
         for _ in range(5):
             fakemouse.move(dx // 5, dy // 5)
             time.sleep(0.01)
         time.sleep(0.1)
-        after = read_xy(CROSSHAIR)
+        after = find_aim(mem)
         # put it back the same way speed up would do mess
         for _ in range(5):
             fakemouse.move(-dx // 5, -dy // 5)
@@ -104,8 +100,14 @@ def calibrate():
 
 fakemouse.start()
 print("Switch to the game and stand still (calibrating the mouse)...")
-while not game_focused():
+while not (game_focused() and find_aim(mem)):
+    print(
+        "waiting for the game to be focused and the crosshair to be visible...",
+        end="\r",
+        flush=True,
+    )
     time.sleep(0.2)
+print()
 time.sleep(0.5)
 scale_x, scale_y = calibrate()
 print(
@@ -139,10 +141,15 @@ try:
                 enemies = [r for r in records if is_enemy(mem, r, rules)]
                 lines = wall_lines(find_walls(mem, records, rules))
                 next_scan = now + 0.25
-            you = read_xy(PLAYER)
-            aim = read_xy(CROSSHAIR)
-        except OSError:
-            print("not in a level                               ", end="\r", flush=True)
+            you = find_me(mem)
+            aim = find_aim(mem)
+            if aim is None:
+                raise OSError("no crosshair found")
+            if you is None:
+                raise OSError("no player found")
+
+        except OSError as err:
+            print(f"{err} (paused)                              ", end="\r", flush=True)
             time.sleep(0.2)
             continue
 

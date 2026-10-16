@@ -67,8 +67,8 @@ aim_last_xy = {}
 aim_last_move = {}
 
 
-# card +0x14 = 0xAF  Or  folder +0x10 = 0xA5
-def find_aim(mem, me):
+# card +0x14 = 0xAF  and  folder +0x10 = 0xA5
+def find_aim(mem):
     cards = table_records(mem)
     if not cards:
         return None
@@ -89,9 +89,11 @@ def find_aim(mem, me):
         return None
     now = time.monotonic()
     for card, xy in aims.items():
-        # new card or it moved
+        # card is not in same place as last time we checked, so it moved
         if aim_last_xy.get(card) != xy:
+            # record when it moved
             aim_last_move[card] = now
+        # remember where it is now
         aim_last_xy[card] = xy
     # last to move
     best = max(aims, key=lambda card: aim_last_move[card])
