@@ -16,14 +16,11 @@ import sys
 import cairo
 import gi
 
-from enemies import find_aim, find_me
-
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
-from enemies import is_enemy, load_rules  # noqa: E402
-from memory import read_double  # noqa: E402
-from memory import attach, follow, load_address, table_records
+from enemies import find_aim, find_me, is_enemy, load_rules
+from memory import attach, read_double, table_records
 from walls import can_see, find_walls, wall_lines  # noqa: E402
 
 SIZE = 400  # radar size on screen, in pixels
@@ -31,9 +28,7 @@ MARGIN = 15  # empty space inside the radar's edge
 TEXT = 22  # strip at the bottom for the numbers
 
 mem, regions, static_regions = attach()
-PLAYER = load_address("player")
-CROSSHAIR = load_address("crosshair")
-Y_OFFSET = load_address("y_offset")
+
 
 # where every object was on the first frame of this level
 start_positions = set()
@@ -42,15 +37,6 @@ bounds = None
 
 
 rules = load_rules()  # what counts as an enemy (made by obj_kinds.py)
-
-
-def read_xy(path):
-    # Follow a saved path and read X, Y (Y sits Y_OFFSET bytes after X).
-    x_addr = follow(mem, path)
-    x, y = read_double(mem, x_addr), read_double(mem, x_addr + Y_OFFSET)
-    if not (0.01 < abs(x) < 100000 and 0.01 < abs(y) < 100000):
-        raise OSError("garbage position")  # menu / loading screen
-    return x, y
 
 
 def on_draw(widget, cr):
@@ -65,8 +51,6 @@ def on_draw(widget, cr):
     cr.set_font_size(13)
 
     try:
-        # you = read_xy(PLAYER)
-        # aim = read_xy(CROSSHAIR)
         you = find_me(mem)
         aim = find_aim(mem)
         objects = table_records(mem)  # {record: (x, y)}

@@ -4,8 +4,8 @@
 import time
 from collections import defaultdict
 
-from enemies import is_enemy, load_rules
-from memory import X_OFF, attach, follow, load_address, read_kind, table_records, wait
+from enemies import find_aim_card, find_me_card, is_enemy, load_rules
+from memory import attach, read_kind, table_records, wait
 
 rules = load_rules()
 if not rules:
@@ -13,8 +13,10 @@ if not rules:
 where, offset, _ = rules[0]  # the spot where the first rule found the kind number
 
 mem, regions, static_regions = attach()
-you = follow(mem, load_address("player")) - X_OFF  # your record
-aim = follow(mem, load_address("crosshair")) - X_OFF  # the crosshair's record
+you = find_me_card(mem)
+aim = find_aim_card(mem)
+if you is None or aim is None:
+    raise SystemExit("can't find you or the crosshair - are you in a level? ")
 
 wait("Stand still and DON'T touch the mouse - watching for 3 seconds", 5)
 first = table_records(mem)
@@ -23,14 +25,6 @@ for _ in range(30):
     time.sleep(0.1)
     now = table_records(mem)
     moving |= {r for r in now if r in first and now[r] != first[r]}
-
-# group every object by its kind number
-# kinds = {}
-# for record in now:
-#     k = read_kind(mem, record, where, offset)
-#     if k not in kinds:
-#         kinds[k] = []
-#     kinds[k].append(record)
 
 kinds = defaultdict(list)
 for record in now:

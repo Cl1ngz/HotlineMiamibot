@@ -8,6 +8,8 @@ import time
 import enemies
 from enemies import (
     copy_memory,
+    find_aim_card,
+    find_me_card,
     find_rules,
     is_enemy,
     load_rules,
@@ -15,23 +17,23 @@ from enemies import (
     save_alive_checks,
     save_rules,
 )
-from memory import X_OFF, attach, follow, load_address, table_records, wait
+from memory import X_OFF, Y_OFF, attach, read_double, table_records, wait
 
 GUESS_FILE = "enemy_guesses.json"
 PLACES = ("record", "object")  # where 0 = record, 1 = object
 
 
-def under_crosshair(mem, you, aim):
+def under_crosshair(mem, you):
     # Look at the table once: (records right under the crosshair, every object's position).
+    # second look: you moved the mouse while aiming, so find_aim_card now knows the live crosshair
+    aim = find_aim_card(mem)
+    if aim is None:
+        raise SystemExit("can't see the crosshair - are you in a level?")
+    # read X and Y from the aim card
+    aim_xy = (read_double(mem, aim + X_OFF), read_double(mem, aim + Y_OFF))
     objects = table_records(mem)
-    if aim not in objects:
-        raise SystemExit(
-            "can't see the crosshair - are you in a level? (if yes: python hmbot.py --setup)"
-        )
     distance = {
-        r: math.dist(xy, objects[aim])
-        for r, xy in objects.items()
-        if r not in (you, aim)
+        r: math.dist(xy, aim_xy) for r, xy in objects.items() if r not in (you, aim)
     }
     closest = min(distance.values())
     if closest > 20:
@@ -45,9 +47,9 @@ def under_crosshair(mem, you, aim):
 def people(mem, you, aim):
     ##Aim at two enemies -> guesses.
     wait("Aim at an ENEMY and keep the crosshair on it", 6)
-    first, before = under_crosshair(mem, you, aim)
+    first, before = under_crosshair(mem, you)
     wait("Now aim at a DIFFERENT enemy", 6)
-    second, after = under_crosshair(mem, you, aim)
+    second, after = under_crosshair(mem, you)
     if set(first) & set(second):
         raise SystemExit(
             "that was the same enemy twice - run again and aim at two different ones"
@@ -87,7 +89,7 @@ def dead(mem, you, aim):
     # Aim at a body that's still orange -> spots where every living enemy agrees and the body doesn't.
     rules = load_rules()
     wait("Aim at the DEAD body that's still orange on the radar", 6)
-    under, objects = under_crosshair(mem, you, aim)
+    under, objects = under_crosshair(mem, you)
     bodies = [r for r in under if is_enemy(mem, r, rules)]
     if not bodies:
         raise SystemExit(
@@ -153,8 +155,11 @@ if "--pick" in sys.argv:
     pick = int(sys.argv[sys.argv.index("--pick") + 1])
 else:
     mem, regions, static_regions = attach()
-    you = follow(mem, load_address("player")) - X_OFF  # your record
-    aim = follow(mem, load_address("crosshair")) - X_OFF  # the crosshair's record
+    you = find_me_card(mem)
+    aim = find_aim_card(mem)
+    if you is None or aim is None:
+        raise SystemExit("can't find you or the crosshair - are you in a level? ")
+
     if "dead" in sys.argv:
         guesses, kind = dead(mem, you, aim)
         last = {"mode": "alive", "guesses": guesses, "kind": kind}
