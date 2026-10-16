@@ -1,3 +1,4 @@
+# https://github.com/Cl1ngz/HotlineMiamibot
 # Bug recreation: the game shuffles the slots and reuses the cards, so the old addresses.json is no longer valid.
 # table: slot address -> card address
 # cards: card address -> what is inside that card

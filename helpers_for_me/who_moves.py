@@ -1,3 +1,4 @@
+# https://github.com/Cl1ngz/HotlineMiamibot
 from memory import X_OFF, attach, first_scan, narrow, read_double, table_records, wait
 
 mem, regions, static_regions = attach()

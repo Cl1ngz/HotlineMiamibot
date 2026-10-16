@@ -1,3 +1,4 @@
+# https://github.com/Cl1ngz/HotlineMiamibot
 import math
 
 from enemies import find_aim, is_enemy, load_rules, matches, save_rules
