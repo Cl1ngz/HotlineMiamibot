@@ -1,0 +1,14 @@
+{
+  "3": {
+    "name": "Lead Pipe",
+    "kind": "melee"
+  },
+  "4": {
+    "name": "Baseball Bat",
+    "kind": "melee"
+  },
+  "5": {
+    "name": "Knife",
+    "kind": "melee"
+  }
+}
