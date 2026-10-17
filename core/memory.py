@@ -330,15 +330,17 @@ def table_records(mem):
     return records
 
 
-# Read a 4-byte number from an object ("which number is in this pocket?").
-#   record = the card's address (the table points to cards; cards sit on the shelf every 0xB8 bytes)
-#   where  = 0 -> read inside the card itself (0xB8 bytes: +0x14 layer, +0x50 X, +0x58 Y)
-#            1 -> read inside the folder: the card's first 4 bytes hold the folder's address (0x6D0 bytes)
-#   offset = how many bytes from the start of the card / folder ("which pocket")
-# Examples:
-#   read_kind(mem, card, 0, 0x14) -> the card's layer (6 enemy, 0xa6 sitting enemy, 0x2C you...)
-#   read_kind(mem, card, 1, 0x10) -> the folder's picture number (0x47 you, 0xA5 crosshair...)
-# Junk address -> OSError.
 def read_kind(mem, record, where, offset):
+    """
+    Read a 4-byte number from an object ("which number is in this pocket?").
+    #   record = the card's address (the table points to cards; cards sit on the shelf every 0xB8 bytes)
+    #   where  = 0 -> read inside the card itself (0xB8 bytes: +0x14 layer, +0x50 X, +0x58 Y)
+    #            1 -> read inside the folder: the card's first 4 bytes hold the folder's address (0x6D0 bytes)
+    #   offset = how many bytes from the start of the card / folder ("which pocket")
+    # Examples:
+       read_kind(mem, card, 0, 0x14) -> the card's layer (6 enemy, 0xa6 sitting enemy, 0x2C you...)
+       read_kind(mem, card, 1, 0x10) -> the folder's picture number (0x47 you, 0xA5 crosshair...)
+     Junk address -> OSError.
+    """
     base = record if where == 0 else read_u32(mem, record)
     return read_u32(mem, base + offset)

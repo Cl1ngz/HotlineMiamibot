@@ -22,10 +22,21 @@ from gi.repository import GLib, Gtk
 from core.enemies import find_aim, find_me, is_enemy, load_rules
 from core.memory import attach, read_double, table_records
 from core.walls import can_see, find_walls, wall_lines  # noqa: E402
+from core.weapons import find_weapons, load_names
 
 SIZE = 400  # radar size on screen, in pixels
 MARGIN = 15  # empty space inside the radar's edge
 TEXT = 22  # strip at the bottom for the numbers
+# weapon kind -> colour (r, g, b from 0 to 1); unknown weapons get GREY
+KIND_COLOURS = {
+    "melee": (0.3, 0.75, 1.0),  # light blue - walk up and hit
+    "gun": (1.0, 0.3, 0.85),  # pink - shoots from far, has ammo
+    "throw": (0.95, 0.95, 0.95),  # white - throw it and your hands are empty
+}
+# a weapon nobody named yet (name_weapon.py)
+GREY = (0.8, 0.8, 0.8)
+# frame -> {"name": "Lead Pipe", "kind": "melee"}
+names = load_names()
 
 mem, regions, static_regions = attach()
 
@@ -128,6 +139,26 @@ def on_draw(widget, cr):
             cr.fill()
         else:
             cr.stroke()
+
+    # weapons on the floor, coloured by kind
+    for x, y, frame in find_weapons(mem):
+        # skip the ones outside the level
+        if x < min_x or x > max_x or y < min_y or y > max_y:
+            continue
+        kind = names.get(frame, {}).get("kind")
+        if kind in KIND_COLOURS:
+            cr.set_source_rgb(*KIND_COLOURS[kind])
+        else:
+            cr.set_source_rgb(*GREY)
+        sx, sy = to_radar(x, y)
+
+        # small plus sign
+        cr.set_line_width(1.5)
+        cr.move_to(sx - 3, sy)
+        cr.line_to(sx + 3, sy)
+        cr.move_to(sx, sy - 3)
+        cr.line_to(sx, sy + 3)
+        cr.stroke()
 
     # you: red circle
     sx, sy = to_radar(*you)

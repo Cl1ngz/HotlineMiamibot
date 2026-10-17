@@ -23,18 +23,11 @@ from core.memory import (
     table_records,
     wait,
 )
-from core.weapons import load_names
+from core.weapons import FLOOR, FRAME, MARK, NAMES_FILE, load_names
 
-# layer -100: things lying on the floor
-FLOOR = 0xFFFFFF9C
-# the picture every weapon on the floor has
-MARK = 0x15
-# where the frame number (= which weapon) sits in the card
-FRAME = 0x98
 # game units around the crosshair
 CLOSE = 20
 KINDS = ("melee", "gun", "throw")
-NAMES_FILE = "weapon_names.json"
 
 
 def show(names):

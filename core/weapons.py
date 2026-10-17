@@ -32,10 +32,17 @@ def find_weapons(mem):
     if not cards:
         return []
     found = []
-    for card in range(...):  # the same shelf walk as find_me_card
+    for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
         try:
-            if ...:  # the weapon signature: layer FLOOR and picture MARK
-                found.append(...)  # (x, y, frame) - frame as a whole number: int(...)
+            # the weapon signature: layer FLOOR and picture MARK
+            if (
+                read_kind(mem, card, 0, 0x14) == FLOOR
+                and read_kind(mem, card, 1, 0x10) == MARK
+            ):
+                x = read_double(mem, card + X_OFF)
+                y = read_double(mem, card + Y_OFF)
+                frame = read_double(mem, card + FRAME)
+                found.append((x, y, int(frame)))
         except OSError:
             continue
     return found
