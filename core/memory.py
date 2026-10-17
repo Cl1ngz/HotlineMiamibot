@@ -18,8 +18,8 @@ GAME_NAME = "hotline"
 ADDRESS_FILE = "addresses.json"
 
 # experimen find_me.py
-PLAYER_KIND = 0x2C  # hides when dead
-AIM_KIND = 0xAF  # closer is the one
+# PLAYER_KIND = 0x2C  # hides when dead
+# AIM_KIND = 0xAF  # closer is the one
 
 
 def find_game():
@@ -167,54 +167,6 @@ def read_u32(mem, address):
     return int.from_bytes(os.pread(mem, 4, address), "little")
 
 
-# if i forgotr it liek looking for somethign in room that u know it is
-def follow(mem, path):
-    # we here
-    address = path[0]
-    # read the note how far to go from here and the walt to it
-    for offset in path[1:]:
-        # add how far to here
-        address = read_u32(mem, address) + offset
-    # returns final addres
-    return address
-
-
-# this is like if u dont know the room but know its somewhere in the hause(mem)
-def find_pointers(snapshot, target, max_offset=0x1000):
-    hits = []
-    for start, data in snapshot.items():
-        values = np.frombuffer(data, dtype="<u4", count=len(data) // 4)
-        # if values <= than the thing u looking and
-        # values >= than the thing u looking - the distance u willing to look
-        mask = (values <= target) & (values >= target - max_offset)
-        # if mask is true then add to hits the address and the value
-        for i in np.flatnonzero(mask):
-            # where it is, where it says
-            hits.append((start + int(i) * 4, int(values[i])))
-    # return genelar list of where it is and what it says
-    return hits
-
-
-# its like building a map of the tresure
-def pointer_scan(heap, static, target):
-    paths = []
-    # where the card lies and the room door it names
-    for where, value in find_pointers(static, target):
-        # where, door to tresure distance
-        paths.append([where, target - value])
-    # find all the cards that say where the tresure is
-    heap_hits = find_pointers(heap, target)
-    # sort them by how close they are to the tresure
-    heap_hits.sort(key=lambda hit: target - hit[1])
-    # take 300 cards
-    for h_where, h_value in heap_hits[:300]:
-        # is there a card at reception (fixed place) that points to this card's office?
-        for s_where, s_value in find_pointers(static, h_where):
-            # map: reception card -> walk to the office card -> follow it -> walk to the treasure
-            paths.append([s_where, h_where - s_value, target - h_value])
-    return paths
-
-
 def wait(text, seconds=4):
     print(text)
     subprocess.run(["notify-send", "-t", str(seconds * 1000), "HMBot", text])
@@ -252,63 +204,6 @@ def load_address(name):
     with open(ADDRESS_FILE) as f:
         value = json.load(f)[name]
     return [int(v, 16) for v in value] if isinstance(value, list) else int(value, 16)
-
-
-def table_objects(mem):
-    # Every object in the game's object table: {table entry address: (x, y)}.
-    data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
-    objects = {}
-    for i in range(0, len(data) - 3, 4):
-        ptr = int.from_bytes(data[i : i + 4], "little")
-        if ptr == 0:
-            continue
-        try:
-            x = read_double(mem, ptr + X_OFF)
-            y = read_double(mem, ptr + Y_OFF)
-        except OSError:
-            continue
-        if 0.01 < abs(x) < 100000 and 0.01 < abs(y) < 100000:
-            objects[TABLE_START + i] = (x, y)
-    return objects
-
-
-def moved(before, after):
-    # Table entries whose position changed between two looks.
-    return {e for e in before if e in after and before[e] != after[e]}
-
-
-def auto_setup(mem):
-    wait("Stand still, hands off", 5)
-    a = table_objects(mem)
-    wait("Move the MOUSE somewhere else (don't walk)")
-    b = table_objects(mem)
-    mouse = moved(a, b)
-    wait("WALK a bit (don't touch the mouse)")
-    c = table_objects(mem)
-    walk = moved(b, c)
-    # moves when you walk, NOT when you move the mouse
-    players = walk - mouse
-    print(f"objects in table: {len(a)}")
-    print(f"moved with mouse: {[hex(e) for e in sorted(mouse)]}")
-    print(f"moved with walking: {[hex(e) for e in sorted(walk)]}")
-    print(f"known entries seen? you: {0xBEC91C in a}, crosshair: {0xBECBD8 in a}")
-    if not players or not mouse:
-        raise SystemExit(
-            "Setup failed: couldn't tell you and the crosshair apart. Run it again."
-        )
-    player = min(players)
-    wait("Put the cursor ON your character and hold it there", 5)
-    d = table_objects(mem)
-    if player not in d:
-        raise SystemExit("Setup failed: lost the player. Run it again.")
-    px, py = d[player]
-    crosshair = min(
-        mouse & d.keys(), key=lambda e: abs(d[e][0] - px) + abs(d[e][1] - py)
-    )
-    save_address("player", [player, X_OFF])
-    save_address("crosshair", [crosshair, X_OFF])
-    save_address("y_offset", Y_OFF - X_OFF)
-    print(f">>> player = {hex(player)}, crosshair = {hex(crosshair)}  (saved)")
 
 
 # Same as table_objects, but keyed by the object itself instead of its seat (seats get shuffled).
