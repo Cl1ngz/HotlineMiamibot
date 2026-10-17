@@ -146,10 +146,7 @@ def on_draw(widget, cr):
         if x < min_x or x > max_x or y < min_y or y > max_y:
             continue
         kind = names.get(frame, {}).get("kind")
-        if kind in KIND_COLOURS:
-            cr.set_source_rgb(*KIND_COLOURS[kind])
-        else:
-            cr.set_source_rgb(*GREY)
+        cr.set_source_rgb(*KIND_COLOURS.get(kind, GREY))
         sx, sy = to_radar(x, y)
 
         # small plus sign

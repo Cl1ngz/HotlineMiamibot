@@ -344,3 +344,11 @@ def read_kind(mem, record, where, offset):
     """
     base = record if where == 0 else read_u32(mem, record)
     return read_u32(mem, base + offset)
+
+
+def table_cards(mem):
+    """
+    Every record the table points to right now (one quick read: 'is this object still alive?').
+    """
+    data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
+    return set(np.frombuffer(data, dtype="<u4").tolist())
