@@ -5,19 +5,11 @@ import math
 import sys
 import time
 
-import enemies
-from enemies import (
-    copy_memory,
-    find_aim_card,
-    find_me_card,
-    find_rules,
-    is_enemy,
-    load_rules,
-    matches,
-    save_alive_checks,
-    save_rules,
-)
-from memory import X_OFF, Y_OFF, attach, read_double, table_records, wait
+import core.enemies
+from core.enemies import (copy_memory, find_aim_card, find_me_card, find_rules,
+                          is_enemy, load_rules, matches, save_alive_checks,
+                          save_rules)
+from core.memory import X_OFF, Y_OFF, attach, read_double, table_records, wait
 
 GUESS_FILE = "enemy_guesses.json"
 PLACES = ("record", "object")  # where 0 = record, 1 = object
@@ -81,8 +73,7 @@ def dogs(mem, you, aim):
             "need at least 2 of them - are the dogs alive and running? (press R and try again)"
         )
     return find_rules(
-        copy_memory(mem, now), runners[:1], runners[1:2], you, set(runners)
-    )
+        copy_memory(mem, now), runners[:1], runners[1:2], you, set(run)
 
 
 def dead(mem, you, aim):

@@ -4,8 +4,8 @@
 import time
 from collections import defaultdict
 
-from enemies import find_aim_card, find_me_card, is_enemy, load_rules
-from memory import attach, read_kind, table_records, wait
+from core.enemies import find_aim_card, find_me_card, is_enemy, load_rules
+from core.memory import attach, read_kind, table_records, wait
 
 rules = load_rules()
 if not rules:

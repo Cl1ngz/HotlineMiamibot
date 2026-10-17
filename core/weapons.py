@@ -5,8 +5,8 @@
 # The frame number at card +0x98 says which weapon it is (names: weapon_names.json, made by name_weapon.py).
 import json
 
-from enemies import RECORD
-from memory import X_OFF, Y_OFF, read_double, read_kind, table_records
+from .enemies import RECORD
+from .memory import X_OFF, Y_OFF, read_double, read_kind, table_records
 
 # layer -100: things lying on the floor
 FLOOR = 0xFFFFFF9C
@@ -17,7 +17,13 @@ FRAME = 0x98
 NAMES_FILE = "weapon_names.json"
 
 
-def load_names(): ...  # move it here from name_weapon.py, unchanged
+def load_names():
+    """{frame number: {"name": ..., "kind": ...}} - empty if nothing was saved yet."""
+    try:
+        with open(NAMES_FILE) as f:
+            return {int(frame): info for frame, info in json.load(f).items()}
+    except (OSError, ValueError):
+        return {}
 
 
 def find_weapons(mem):

@@ -2,7 +2,7 @@
 # where the walls are
 from collections import defaultdict
 
-from memory import read_kind
+from .memory import read_kind
 
 # obj_type or kinds to verify if broken
 # values tat go uup its the value

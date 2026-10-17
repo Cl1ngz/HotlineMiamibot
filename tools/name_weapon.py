@@ -13,8 +13,17 @@ import json
 import math
 import sys
 
-from enemies import RECORD, find_aim
-from memory import X_OFF, Y_OFF, attach, read_double, read_kind, table_records, wait
+from core.enemies import RECORD, find_aim
+from core.memory import (
+    X_OFF,
+    Y_OFF,
+    attach,
+    read_double,
+    read_kind,
+    table_records,
+    wait,
+)
+from core.weapons import load_names
 
 # layer -100: things lying on the floor
 FLOOR = 0xFFFFFF9C
@@ -26,15 +35,6 @@ FRAME = 0x98
 CLOSE = 20
 KINDS = ("melee", "gun", "throw")
 NAMES_FILE = "weapon_names.json"
-
-
-def load_names():
-    """{frame number: {"name": ..., "kind": ...}} - empty if nothing was saved yet."""
-    try:
-        with open(NAMES_FILE) as f:
-            return {int(frame): info for frame, info in json.load(f).items()}
-    except (OSError, ValueError):
-        return {}
 
 
 def show(names):

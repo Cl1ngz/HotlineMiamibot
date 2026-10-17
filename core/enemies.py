@@ -5,7 +5,7 @@ import os
 import time
 from collections import defaultdict
 
-from memory import (
+from .memory import (
     X_OFF,
     Y_OFF,
     load_address,

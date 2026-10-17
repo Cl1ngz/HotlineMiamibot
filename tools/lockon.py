@@ -12,9 +12,9 @@ import time
 
 import numpy as np
 
-import fakemouse
-from enemies import find_aim, find_me, is_enemy, load_rules
-from memory import (
+import core.fakemouse
+from core.enemies import find_aim, find_me, is_enemy, load_rules
+from core.memory import (
     TABLE_END,
     TABLE_START,
     X_OFF,
@@ -23,7 +23,7 @@ from memory import (
     read_double,
     table_records,
 )
-from walls import can_see, find_walls, wall_lines
+from core.walls import can_see, find_walls, wall_lines
 
 # how much of the gap to close each frame (1.0 = all at once, lower = smoother)
 GAIN = 0.5

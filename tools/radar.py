@@ -19,9 +19,9 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
-from enemies import find_aim, find_me, is_enemy, load_rules
-from memory import attach, read_double, table_records
-from walls import can_see, find_walls, wall_lines  # noqa: E402
+from core.enemies import find_aim, find_me, is_enemy, load_rules
+from core.memory import attach, read_double, table_records
+from core.walls import can_see, find_walls, wall_lines  # noqa: E402
 
 SIZE = 400  # radar size on screen, in pixels
 MARGIN = 15  # empty space inside the radar's edge
