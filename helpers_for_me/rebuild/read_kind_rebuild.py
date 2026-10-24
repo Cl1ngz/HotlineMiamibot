@@ -26,6 +26,7 @@ def read_kind(mem, card, where, offset):
         # open the locker at card then open the locker at the number inside + offset and return that number
         folder = read_u32(mem, card)
         return read_u32(mem, folder + offset)
+    raise ValueError(f"where must be 0 or 1, not {where}")
 
 
 # each test: (card, where, offset) and what read_kind should give back

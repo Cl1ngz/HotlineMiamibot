@@ -244,6 +244,7 @@ def read_kind(mem, record, where, offset):
 def table_cards(mem):
     """
     Every record the table points to right now (one quick read: 'is this object still alive?').
+    {0} is not a valid record, so it's removed from the set.
     """
     data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
-    return set(np.frombuffer(data, dtype="<u4").tolist())
+    return set(np.frombuffer(data, dtype="<u4").tolist()) - {0}
