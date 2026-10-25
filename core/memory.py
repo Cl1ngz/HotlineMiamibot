@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import struct
 import subprocess
 import time
 
@@ -93,6 +94,11 @@ def read_double(mem, address):
     if len(data) < 8:
         raise OSError(f"can't read {hex(address)}")
     return np.frombuffer(data, dtype="<f8")[0]
+
+
+def write_double(mem, address, value):
+    code = struct.pack("<d", value)
+    os.pwrite(mem, code, address)
 
 
 def narrow(mem, candidates, how):
@@ -248,3 +254,14 @@ def table_cards(mem):
     """
     data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
     return set(np.frombuffer(data, dtype="<u4").tolist()) - {0}
+
+
+def open_rw():
+    """Open the game's memory for reading and writing."""
+    game = find_game()
+    if game is None:
+        raise RuntimeError("Hotline Miami isn't running - start it first")
+    pid, _, _ = game
+    mem = os.open(f"/proc/{pid}/mem", os.O_RDWR)
+
+    return mem
