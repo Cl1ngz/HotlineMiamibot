@@ -7,15 +7,14 @@ import math
 import sys
 import time
 
-from core import fakemouse, lockon
+from core import lockon
 from core.enemies import find_aim, find_me, is_enemy, load_rules
-from core.game import game_focused
-from core.memory import attach, table_cards, table_records
+from core.hands import look_at
+from core.memory import attach, open_rw, table_cards, table_records
 from core.walls import find_walls, wall_lines
 
 FPS = 60  # the game runs at 60 frames per second, no point going faster
 SCAN_EVERY = 0.25  # seconds between the slow part: finding enemies and walls
-FOCUS_EVERY = 0.25  # seconds between asking Hyprland which window has focus
 
 
 def status(text):
@@ -24,10 +23,10 @@ def status(text):
 
 
 def wait_for_game(mem):
-    """Wait until the game is focused and you're in a level."""
-    while not (game_focused() and find_aim(mem)):
+    """Wait until  you're in a level."""
+    while not (find_aim(mem)):
         print(
-            "waiting for the game to be focused and the crosshair to be visible...",
+            "waiting for  the crosshair to be visible...",
             end="\r",
             flush=True,
         )
@@ -36,36 +35,18 @@ def wait_for_game(mem):
 
 
 mem, regions, static_regions = attach()
+mem_rw = open_rw()
 rules = load_rules()
 if not rules:
     raise SystemExit("no enemy rules yet - run python -m tools.obj_kinds first")
 stop_at = time.monotonic() + float(sys.argv[1]) if len(sys.argv) > 1 else math.inf
 
-fakemouse.start()
 try:
     wait_for_game(mem)
-    try:
-        scales = lockon.calibrate(mem)
-    except RuntimeError as err:
-        raise SystemExit(f"calibration failed: {err}")
-    print(
-        f"1 mouse count = {scales[0]:.3f} game units sideways, {scales[1]:.3f} up/down. Locking!"
-    )
-
     enemies, lines = [], []
-    next_scan = next_focus = 0
-    focused = True
+    next_scan = 0
     while time.monotonic() < stop_at:
         now = time.monotonic()
-
-        # --- is the game in front? ---
-        if now >= next_focus:
-            focused = game_focused()
-            next_focus = now + FOCUS_EVERY
-        if not focused:
-            print("paused (game not focused)                    ", end="\r", flush=True)
-            time.sleep(0.1)
-            continue
 
         # --- see ---
         try:
@@ -94,14 +75,16 @@ try:
         if target is None:
             status("no enemy in sight")
         else:
-            off = lockon.aim_at(spots[target], aim, scales)
+            look_at(mem, mem_rw, spots[target])
             far = math.dist(spots[target], you)
-            status(
-                f"LOCKED on enemy {far:3.0f} away ({len(spots)} in sight), crosshair {off:5.1f} off"
-            )
-        time.sleep(1 / FPS)
+            status(f"LOCKED on enemy {far:3.0f} away ({len(spots)} in sight)")
+        # time.sleep(1 / FPS)
+        frame_end = now + 1 / FPS
+        while time.monotonic() < frame_end:
+            if target is not None:
+                look_at(mem, mem_rw, spots[target])
+            time.sleep(0.002)  # don't burn CPU while waiting for the next frame
 except KeyboardInterrupt:
     pass
 finally:
-    fakemouse.stop()
     print("\nbye!")
