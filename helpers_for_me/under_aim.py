@@ -5,8 +5,16 @@
 #   python -m helpers_for_me.under_aim      (a pop-up and a 3 s countdown give you time to aim)
 import math
 
-from enemies import RECORD, find_aim
-from memory import X_OFF, Y_OFF, attach, read_double, read_kind, table_records, wait
+from core.enemies import RECORD, find_aim
+from core.memory import (
+    X_OFF,
+    Y_OFF,
+    attach,
+    read_double,
+    read_kind,
+    table_records,
+    wait,
+)
 
 CLOSE = 20  # game units around the crosshair
 
