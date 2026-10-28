@@ -9,12 +9,18 @@ import time
 
 from core import lockon
 from core.enemies import find_aim, find_me, is_enemy, load_rules
-from core.hands import look_at
+from core.hands import look_at, press, release
 from core.memory import attach, open_rw, table_cards, table_records
 from core.walls import find_walls, wall_lines
 
 FPS = 60  # the game runs at 60 frames per second, no point going faster
 SCAN_EVERY = 0.25  # seconds between the slow part: finding enemies and walls
+# Enemy this cloes get hit
+REACH = 35
+# seconds to hold the leftbutton
+HOLD = 0.15
+# seconds betwen two swings
+COOLDOWN = 0.4
 
 
 def status(text):
@@ -45,6 +51,10 @@ try:
     wait_for_game(mem)
     enemies, lines = [], []
     next_scan = 0
+    # when to let go of the button
+    release_at = None
+    # when to swing again
+    next_swing = 0
     while time.monotonic() < stop_at:
         now = time.monotonic()
 
@@ -76,8 +86,22 @@ try:
             status("no enemy in sight")
         else:
             look_at(mem, mem_rw, spots[target])
+            # if close enought? and button free? and cooldown over?
             far = math.dist(spots[target], you)
+            if (
+                far < REACH
+                and (release_at is None or now >= release_at)
+                and now >= next_swing
+            ):
+                press(mem, mem_rw)
+                release_at = now + HOLD
+                next_swing = now + COOLDOWN
+
             status(f"LOCKED on enemy {far:3.0f} away ({len(spots)} in sight)")
+        if release_at is not None and now >= release_at:
+            release(mem, mem_rw)
+            release_at = None
+
         # time.sleep(1 / FPS)
         frame_end = now + 1 / FPS
         while time.monotonic() < frame_end:
