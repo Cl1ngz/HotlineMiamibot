@@ -57,6 +57,9 @@ try:
     next_swing = 0
     while time.monotonic() < stop_at:
         now = time.monotonic()
+        if release_at is not None and now >= release_at:
+            release(mem, mem_rw)
+            release_at = None
 
         # --- see ---
         try:
@@ -88,19 +91,12 @@ try:
             look_at(mem, mem_rw, spots[target])
             # if close enought? and button free? and cooldown over?
             far = math.dist(spots[target], you)
-            if (
-                far < REACH
-                and (release_at is None or now >= release_at)
-                and now >= next_swing
-            ):
+            if far < REACH and (release_at is None) and now >= next_swing:
                 press(mem, mem_rw)
                 release_at = now + HOLD
                 next_swing = now + COOLDOWN
 
             status(f"LOCKED on enemy {far:3.0f} away ({len(spots)} in sight)")
-        if release_at is not None and now >= release_at:
-            release(mem, mem_rw)
-            release_at = None
 
         # time.sleep(1 / FPS)
         frame_end = now + 1 / FPS
