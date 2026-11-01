@@ -37,15 +37,11 @@ KEY_R = 0x13
 
 def key_down(mem, mem_rw, key):
     """Hold a key (one of the KEY_ numbers above)."""
-    # TODO: follow KEYBOARD -> that's the START of the row; the key's byte is start + key; write HELD there
-    ...
     os.pwrite(mem_rw, HELD, follow(mem, KEYBOARD) + key)
 
 
 def key_up(mem, mem_rw, key):
     """Let go of a key."""
-    # TODO
-    ...
     os.pwrite(mem_rw, RELEASED, follow(mem, KEYBOARD) + key)
 
 

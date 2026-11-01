@@ -10,7 +10,18 @@ import time
 from core import lockon
 from core.enemies import find_aim, find_me, is_enemy, load_rules
 from core.hands import KEY_SPACE, key_down, key_up, look_at, press, release
-from core.memory import attach, open_rw, read_kind, table_cards, table_records
+from core.legs import hold, keys_toward, next_point
+from core.memory import (
+    X_OFF,
+    Y_OFF,
+    attach,
+    open_rw,
+    read_double,
+    read_kind,
+    table_cards,
+    table_records,
+)
+from core.path import find_path
 from core.walls import find_walls, wall_lines
 
 FPS = 60  # the game runs at 60 frames per second, no point going faster
@@ -28,11 +39,29 @@ LYING = 0xFFFFFF9C
 EXECUTE_REACH = 35
 # after SPACE you sit on him: the game hides your card (no player found) and you finish him with the LEFT button
 MOUNTED_FOR = 2.0  # seconds after SPACE we keep hitting even without seeing you
+# seconds between two searches for the way
+REPLAN = 0.5
 
 
 def status(text):
     """One line at the bottom of the terminal that keeps being overwritten."""
     print(f"{text:60}", end="\r", flush=True)
+
+
+def where(mem, cards, alive):
+    """{card: (x, y)} of these cards that are still in the table - seen or behind a wall."""
+    spots = {}
+    for card in cards:
+        if card not in alive:
+            continue
+        try:
+            spots[card] = (
+                read_double(mem, card + X_OFF),
+                read_double(mem, card + Y_OFF),
+            )
+        except OSError:
+            continue
+    return spots
 
 
 def wait_for_game(mem):
@@ -55,6 +84,8 @@ if not rules:
 stop_at = time.monotonic() + float(sys.argv[1]) if len(sys.argv) > 1 else math.inf
 
 slowest = 0
+# walking keys we hold now
+held = set()
 try:
     wait_for_game(mem)
     enemies, lines = set(), []
@@ -68,6 +99,7 @@ try:
     mounted_until = 0
     # when to swing again
     next_swing = 0
+    path, next_plan = None, 0
     while time.monotonic() < stop_at:
         now = time.monotonic()
         if release_at is not None and now >= release_at:
@@ -103,10 +135,12 @@ try:
                     next_swing = now + COOLDOWN
                 status("MOUNTED - hitting")
                 time.sleep(1 / FPS)  # not 0.2 s like a pause - every frame counts here
+                held = hold(mem, mem_rw, set(), held)
                 continue
             lockon.reset()  # menu / new floor: forget the old target
             status(f"{err} (paused)")
             time.sleep(0.2)
+            held = hold(mem, mem_rw, set(), held)
             continue
 
         # --- decide ---
@@ -127,7 +161,7 @@ try:
                 # on the floor: stand on him and press SPACE (like a click: hold a moment, then let go)
                 if far < EXECUTE_REACH and space_up_at is None and now >= next_swing:
                     key_down(mem, mem_rw, KEY_SPACE)
-                    print(f"\nSPACE! far {far:.0f}")
+                    # print(f"\nSPACE! far {far:.0f}")
                     space_up_at = now + HOLD
                     next_swing = now + COOLDOWN
                     mounted_until = now + MOUNTED_FOR
@@ -138,11 +172,34 @@ try:
             status(
                 f"LOCKED on {'LYING' if lying else 'standing'} enemy {far:3.0f} away ({len(spots)} in sight)"
             )
+        # --- walk ---
+        goal = None  # where to go
+        close_enough = REACH  # this close - stop walking
+        target_spot = spots.get(target)
+        if target_spot is not None:
+            goal = target_spot
+            close_enough = (
+                EXECUTE_REACH if read_kind(mem, target, 0, 0x14) == LYING else REACH
+            )
+        else:
+            hidden = where(
+                mem, still_enemies, cards
+            )  # every enemy, also behind the walls
+            if hidden:
+                goal = min(hidden.values(), key=lambda xy: math.dist(xy, you))
+        keys = set()
+        if goal is not None and math.dist(goal, you) > close_enough:
+            if now >= next_plan:
+                path = find_path(you, goal, lines)
+                next_plan = now + REPLAN
+            if path is not None:
+                point = next_point(path, you)
+                if point is not None:
+                    keys = keys_toward(you, point)
+        held = hold(mem, mem_rw, keys, held)
 
-        # time.sleep(1 / FPS)
-        work = (
-            time.monotonic() - now
-        ) * 1000  # ms spent on see + decide + act in this loop
+        # ms spent on see + decide + act in this loop
+        work = (time.monotonic() - now) * 1000
         slowest = max(slowest, work)
         if work > 1000 / FPS:
             print(f"\nslow loop: {work:.1f} ms")
@@ -157,4 +214,5 @@ finally:
     print("\nbye!")
     release(mem, mem_rw)
     key_up(mem, mem_rw, KEY_SPACE)
+    hold(mem, mem_rw, set(), held)
     print(f"slowest loop: {slowest:.1f} ms")
