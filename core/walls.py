@@ -11,6 +11,8 @@ TILE = 32
 #   walls: real map numbers (a wall at 192,128 -> 192, 128, 199, 159: 8 thick, 32 long)
 #   sofas, you: counted from the thing's x, y (a sofa -> -4, -8, 5, 7; you -> -8, -8, 7, 7)
 BOX = 0x78
+# nothing in a level is this big - a bigger box is junk (seen after dying on floor 2 + R)
+MAX_BOX = 512
 # a door: a card on the floor layer with this folder picture. Its x, y is the HINGE (the end it turns around)
 FLOOR = 0xFFFFFF9C
 FAKE_DOOR = 0x20
@@ -115,6 +117,10 @@ def read_box(mem, card, xy):
     if abs(left) < abs(left - x):  # closer to 0 than to x -> counted from x, y
         left, right = left + x, right + x
         top, bottom = top + y, bottom + y
+    if not (0 <= right - left <= MAX_BOX and 0 <= bottom - top <= MAX_BOX):
+        raise OSError(
+            "junk box"
+        )  # wall_boxes and fake_door_boxes skip OSError, like junk memory
     return left, top, right + 1, bottom + 1
 
 

@@ -3,7 +3,9 @@
 #
 #   python hmbot.py         run until Ctrl+C
 #   python hmbot.py 30      stop by itself after 30 seconds
+import faulthandler
 import math
+import signal
 import sys
 import time
 
@@ -30,13 +32,16 @@ from core.memory import (
     table_cards,
     table_records,
 )
-from core.path import blocked_cells, cell_of, find_path
+from core.path import blocked_cells, find_path
 from core.stairs import find_stairs
 from core.walls import can_see, fake_door_boxes, find_walls, wall_boxes, wall_lines
-from core.weapons import find_weapons, load_names
+from core.weapons import find_goals, find_weapons, load_names
 
 FPS = 60  # the game runs at 60 frames per second, no point going faster
-SCAN_EVERY = 0.25  # seconds between the slow part: finding enemies and walls
+# seconds between the slow part: finding enemies and walls
+SCAN_EVERY = 0.25
+# walls, sofas and fake doors never move - look for them less often
+WALLS_EVERY = 2.0
 # Enemy this cloes get hit
 REACH = 35
 # seconds to hold the leftbutton
@@ -44,8 +49,8 @@ HOLD = 0.15
 # seconds betwen two swings
 COOLDOWN = 0.25
 # a lying enemy: a swing does nothing to him, SPACE finishes him
-# card +0x14 of a lying enemy (-100, as read_kind/read_u32 sees it)
-LYING = 0xFFFFFF9C
+# card +0x10 of an enemy knocked out on the floor - only then SPACE finishes him
+KNOCKED = 0x16
 # stand this close (on top of him) - a guess, we'll check it with the blackbox/
 EXECUTE_REACH = 35
 # after SPACE you sit on him: the game hides your card (no player found) and you finish him with the LEFT button
@@ -112,6 +117,9 @@ def wait_for_game(mem):
 
 mem, regions, static_regions = attach()
 mem_rw = open_rw()
+# stuck? in another terminal:  kill -USR1 $(pgrep -f hmbot.py)   -> where it is right now goes to stuck.txt
+stuck_file = open("stuck.txt", "w")
+faulthandler.register(signal.SIGUSR1, file=stuck_file)
 rules = load_rules()
 names = load_names()  # weapon frame -> {"name": ..., "kind": ...}
 if not rules:
@@ -126,6 +134,7 @@ try:
     enemies, lines = set(), []
     known_cards = set()  # every card that was in the table last frame
     next_scan = 0
+    next_walls = 0
     # when to let go of the button
     release_at = None
     # when to let go of SPACE
@@ -137,7 +146,11 @@ try:
     path, next_plan = None, 0
     stairs = None
     blocked = set()  # cells your middle can't stand in (walls and sofas)
-    weapons = []  # (x, y) of melee weapons lying on the floor
+    # (x, y) of melee weapons lying on the floor
+    weapons = []
+    # (x, y) of the level's things to take (the briefcase...)
+    goals = []
+
     # when to let go of the right button / when we may right click again
     right_up_at, next_grab = None, 0
     while time.monotonic() < stop_at:
@@ -159,15 +172,20 @@ try:
                 enemies = {
                     r for r in shelf_cards(mem, records) if is_enemy(mem, r, rules)
                 }
-                lines = wall_lines(find_walls(mem, records, rules))
-                boxes = wall_boxes(mem, records, rules) + fake_door_boxes(mem, records)
-                blocked = blocked_cells(boxes)
+                if now >= next_walls:
+                    lines = wall_lines(find_walls(mem, records, rules))
+                    boxes = wall_boxes(mem, records, rules) + fake_door_boxes(
+                        mem, records
+                    )
+                    blocked = blocked_cells(boxes)
+                    next_walls = now + WALLS_EVERY
                 stairs = find_stairs(mem, records)
                 weapons = [
                     (x, y)
                     for x, y, frame in find_weapons(mem)
                     if names.get(frame, {}).get("kind") == "melee"
                 ]
+                goals = find_goals(mem)
                 next_scan = now + SCAN_EVERY
             # cards that weren't in the table last frame (someone stood up, a new enemy came in):
             # check them NOW instead of waiting for the next scan
@@ -195,6 +213,7 @@ try:
             lockon.reset()  # menu / new floor: forget the old target
             stairs = None  # new floor: the old stairs are not ours any more
             next_scan = 0  # look at the new floor right away
+            next_walls = 0  # a new floor: new walls right away
             status(f"{err} (paused)")
             time.sleep(0.2)
             held = hold(mem, mem_rw, set(), held)
@@ -209,9 +228,12 @@ try:
         spots = lockon.visible_enemies(mem, still_enemies, alive, you, lines)
         target = lockon.choose_target(mem, spots, you, rules)
         enemy_far = math.dist(spots[target], you) if target is not None else math.inf
-        grab = None  # the weapon we go for
+        grab = None  # the thing we go to pick up
         if hand in EMPTY_HANDS:
             grab = choose_weapon(weapons, you, enemy_far, lines)
+        if grab is None and goals and not still_enemies:
+            # the floor is clear: take the level's goal, wherever it lies - the right button swaps it for the weapon
+            grab = min(goals, key=lambda xy: math.dist(xy, you))
 
         # --- act ---
         if target is None:
@@ -220,7 +242,7 @@ try:
             look_at(mem, mem_rw, spots[target])
             # if close enought? and button free? and cooldown over?
             far = math.dist(spots[target], you)
-            lying = read_kind(mem, target, 0, 0x14) == LYING
+            lying = read_kind(mem, target, 0, 0x10) == KNOCKED
             if lying:
                 # on the floor: stand on him and press SPACE (like a click: hold a moment, then let go)
                 if far < EXECUTE_REACH and space_up_at is None and now >= next_swing:
@@ -237,7 +259,6 @@ try:
                 f"LOCKED on {'LYING' if lying else 'standing'} enemy {far:3.0f} away ({len(spots)} in sight)"
             )
         if grab is not None:
-            # TODO 3: close enough (GRAB_REACH)? right button free (right_up_at)? GRAB_COOLDOWN over (next_grab)?
             #   -> press_right, and set right_up_at and next_grab (look at the left click a few lines up)
             if (
                 math.dist(grab, you) < GRAB_REACH
@@ -247,18 +268,19 @@ try:
                 press_right(mem, mem_rw)
                 right_up_at = now + HOLD
                 next_grab = now + GRAB_COOLDOWN
-            status(f"GRABBING a weapon {math.dist(grab, you):3.0f} away")
+            status(f"GRABBING {math.dist(grab, you):3.0f} away")
         # --- walk ---
         goal = None  # where to go
         close_enough = REACH  # this close - stop walking
         target_spot = spots.get(target)
         if grab is not None:
-            goal = grab  # empty hands: the weapon first
+            # a weapon (empty hands) or the level goal first
+            goal = grab
             close_enough = GRAB_REACH
         elif target_spot is not None:
             goal = target_spot
             close_enough = (
-                EXECUTE_REACH if read_kind(mem, target, 0, 0x14) == LYING else REACH
+                EXECUTE_REACH if read_kind(mem, target, 0, 0x10) == KNOCKED else REACH
             )
         else:
             # every enemy, also behind the walls

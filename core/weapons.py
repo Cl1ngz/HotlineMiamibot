@@ -46,3 +46,27 @@ def find_weapons(mem):
         except OSError:
             continue
     return found
+
+
+GOAL = 0xCB
+
+
+def find_goals(mem):
+    """[(x, y), ...] for every goal (the briefcase...) lying on the floor."""
+    cards = table_records(mem)
+    if not cards:
+        return []
+    found = []
+    for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
+        try:
+            # the goal signature: layer FLOOR and picture GOAL
+            if (
+                read_kind(mem, card, 0, 0x14) == FLOOR
+                and read_kind(mem, card, 1, 0x10) == GOAL
+            ):
+                x = read_double(mem, card + X_OFF)
+                y = read_double(mem, card + Y_OFF)
+                found.append((x, y))
+        except OSError:
+            continue
+    return found
