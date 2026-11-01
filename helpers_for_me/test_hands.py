@@ -9,14 +9,16 @@
 import time
 
 from core.enemies import find_me, find_me_card
-from core.hands import BUTTON, LOOK_X, LOOK_Y, follow, look_at, press, release
+from core.hands import BUTTON, LOOK_X, LOOK_Y, follow, look_at, press_left, release_left
 from core.memory import attach, open_rw, read_u32, wait
 
 SPRITE = 0xA0  # card +0xA0: leaves its resting number when a swing starts
 
 mem, regions, static_regions = attach()
 mem_rw = open_rw()
-print(f"look X at {follow(mem, LOOK_X):#x}, look Y at {follow(mem, LOOK_Y):#x}, button at {follow(mem, BUTTON):#x}")
+print(
+    f"look X at {follow(mem, LOOK_X):#x}, look Y at {follow(mem, LOOK_Y):#x}, button at {follow(mem, BUTTON):#x}"
+)
 
 you = find_me(mem)
 card = find_me_card(mem)
@@ -30,14 +32,14 @@ while time.monotonic() < end:
     time.sleep(0.002)
 
 rest = read_u32(mem, card + SPRITE)
-press(mem, mem_rw)
+press_left(mem, mem_rw)
 swung = False
 end = time.monotonic() + 0.15
 while time.monotonic() < end:
     look_at(mem, mem_rw, (you[0] + 80, you[1]))
     swung |= read_u32(mem, card + SPRITE) != rest
     time.sleep(0.002)
-release(mem, mem_rw)
+release_left(mem, mem_rw)
 end = time.monotonic() + 0.5
 while time.monotonic() < end:
     swung |= read_u32(mem, card + SPRITE) != rest

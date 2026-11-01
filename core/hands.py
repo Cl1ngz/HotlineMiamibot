@@ -60,11 +60,21 @@ def look_at(mem, mem_rw, xy):
     write_double(mem_rw, follow(mem, LOOK_Y), xy[1])
 
 
-def press(mem, mem_rw):
+def press_left(mem, mem_rw):
     """Hold the left mouse button down."""
     os.pwrite(mem_rw, HELD, follow(mem, BUTTON))
 
 
-def release(mem, mem_rw):
+def release_left(mem, mem_rw):
     """Let go of the left mouse button."""
     os.pwrite(mem_rw, RELEASED, follow(mem, BUTTON))
+
+
+def press_right(mem, mem_rw):
+    """Hold the right mouse button down."""
+    os.pwrite(mem_rw, HELD, follow(mem, BUTTON) + 1)
+
+
+def release_right(mem, mem_rw):
+    """Let go of the right mouse button."""
+    os.pwrite(mem_rw, RELEASED, follow(mem, BUTTON) + 1)

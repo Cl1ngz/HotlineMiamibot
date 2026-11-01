@@ -3,7 +3,9 @@
 #
 # Start = you, goal = the crosshair (put it somewhere you CAN'T walk to in a straight line - around a corner,
 # into the next room). It runs find_path, says how long it took and draws the map:
-#   #  wall      *  the way      A  you      B  the crosshair      .  floor
+#   #  blocked (your middle can't stand here: a wall or sofa box, made your half size bigger)
+#   D  blocked: a door that never opens (floor 2) - for the way it's a wall
+#   *  the way      A  you      B  the crosshair      .  floor
 #
 #   python -m helpers_for_me.path_test      (be in a level; move the mouse when told, then hold it still)
 import math
@@ -11,8 +13,8 @@ import time
 
 from core.enemies import find_aim, find_me, load_rules
 from core.memory import attach, table_records, wait
-from core.path import CELL, cell_of, find_path
-from core.walls import find_walls, wall_lines
+from core.path import blocked_cells, cell_of, find_path
+from core.walls import fake_door_boxes, wall_boxes
 
 MARGIN = 3  # cells of map around the way
 
@@ -28,24 +30,22 @@ goal = find_aim(mem)
 if you is None or goal is None:
     raise SystemExit("can't find you or the crosshair - are you in a level?")
 
-lines = wall_lines(find_walls(mem, table_records(mem), rules))
+records = table_records(mem)
+boxes = wall_boxes(mem, records, rules)
+doors = blocked_cells(fake_door_boxes(mem, records))
 start = time.perf_counter()
-path = find_path(you, goal, lines)
+blocked = blocked_cells(boxes) | doors
+path = find_path(you, goal, blocked)
 ms = (time.perf_counter() - start) * 1000
 
-print(f"you {you[0]:.0f},{you[1]:.0f}  ->  crosshair {goal[0]:.0f},{goal[1]:.0f}   ({len(lines)} wall lines)")
+print(f"you {you[0]:.0f},{you[1]:.0f}  ->  crosshair {goal[0]:.0f},{goal[1]:.0f}   ({len(boxes)} boxes, {len(doors)} cells of fake doors, {len(blocked)} blocked cells)")
 if path is None:
     print(f"NO WAY found ({ms:.0f} ms)")
 else:
     walked = sum(math.dist(a, b) for a, b in zip(path, path[1:]))
     print(f"way: {len(path)} cells, {walked:.0f} units long (straight line: {math.dist(you, goal):.0f})  in {ms:.0f} ms")
 
-# the map: every cell a wall line goes through is '#'
-walls = set()
-for (x1, y1), (x2, y2) in lines:
-    steps = max(1, int(math.dist((x1, y1), (x2, y2)) / (CELL / 4)))
-    for i in range(steps + 1):
-        walls.add(cell_of((x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)))
+# the map: one character = one cell
 on_way = {cell_of(point) for point in path} if path else set()
 corners = [cell_of(you), cell_of(goal)] + list(on_way)
 left = min(c[0] for c in corners) - MARGIN
@@ -62,7 +62,9 @@ for row in range(top, bottom + 1):
             text += "B"
         elif cell in on_way:
             text += "*"
-        elif cell in walls:
+        elif cell in doors:
+            text += "D"
+        elif cell in blocked:
             text += "#"
         else:
             text += "."

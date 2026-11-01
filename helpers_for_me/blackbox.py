@@ -10,18 +10,19 @@
 # It keeps only the last KEEP seconds. When you die it saves them to blackbox_1.txt, blackbox_2.txt...
 # Ctrl+C saves the last seconds too - for moments that aren't a death (e.g. the enemy knocked down by a door).
 #
-# "near" mode: instead of rule-matching objects, write down EVERY object closer than NEAR_RANGE
-# (except you and the walls) - for things our rules don't know yet, like a freshly knocked-down enemy.
+# "near" mode: instead of rule-matching objects, write down EVERY object closer than 60 (except you and the walls)
+# from the whole SHELF - also cards that are NOT in the table (marked "NOT in table"), like the player sometimes is.
 #
 #   python -m helpers_for_me.blackbox         (hmbot in another terminal, then play; send me the .txt files)
 #   python -m helpers_for_me.blackbox near    (everything right around you)
+#   python -m helpers_for_me.blackbox near 200   (the same, but up to 200 units from you)
 import math
 import subprocess
 import sys
 import time
 from collections import Counter, deque
 
-from core.enemies import find_me_card, is_enemy, load_rules, matches
+from core.enemies import RECORD, find_me_card, is_enemy, load_rules, matches
 from core.hands import LOOK_X, LOOK_Y, follow
 from core.memory import X_OFF, Y_OFF, attach, read_double, read_u32, table_cards, table_records
 from core.walls import can_see, find_walls, wall_lines
@@ -30,7 +31,8 @@ EVERY = 1 / 30  # seconds between two samples
 KEEP = 8  # seconds of history to save
 SCAN_EVERY = 0.25  # seconds between looking for new enemy cards (like hmbot)
 NEAR = len(sys.argv) > 1 and sys.argv[1] == "near"
-RANGE = 60 if NEAR else 250  # only write down things this close to you (250 = lockon's MAX_RANGE)
+# only write down things this close to you (250 = lockon's MAX_RANGE); near mode: 60, or the number after "near"
+RANGE = (float(sys.argv[2]) if len(sys.argv) > 2 else 60) if NEAR else 250
 LAYER = 0x14
 SWING = 0xA0
 EXTRA = (0x10, 0xA4, 0xB4)  # card offsets we're unsure about - shown for every enemy
@@ -60,7 +62,7 @@ def read_look():
         return None
 
 
-def describe(card, you, look, lines):
+def describe(card, you, look, lines, in_table):
     """One line about one enemy-looking object, or None if it's far away or gone."""
     try:
         xy = xy_of(card)
@@ -74,9 +76,10 @@ def describe(card, you, look, lines):
     enemy = "YES" if is_enemy(mem, card, rules) else "no "
     see = "YES" if can_see(you, xy, lines) else "no "
     aimed = "  <- LOOK" if look is not None and math.dist(look, xy) < LOOK_NEAR else ""
+    shelf = "" if in_table else "  NOT in table"
     return (
         f"   {card:#x} ({xy[0]:4.0f},{xy[1]:4.0f}) far {far:3.0f}  layer {layer:#6x}  {extra}"
-        f"  enemy={enemy} see={see}{aimed}"
+        f"  enemy={enemy} see={see}{shelf}{aimed}"
     )
 
 
@@ -91,8 +94,9 @@ def sample(candidates, lines):
     text = [f"you ({you[0]:4.0f},{you[1]:4.0f})  look {look_text}  swing +0xA0 {read_u32(mem, me + SWING):#x}"]
     alive = table_cards(mem)
     for card in candidates:
-        if card in alive and card != me:
-            line = describe(card, you, look, lines)
+        # near mode looks at the whole shelf - cards outside the table too (they can be alive, like you)
+        if (NEAR or card in alive) and card != me:
+            line = describe(card, you, look, lines, card in alive)
             if line is not None:
                 text.append(line)
     return text
@@ -111,17 +115,27 @@ def save(history, number):
 
 
 def everything_but_walls(records):
-    """Every card except the walls: the walls are the layer that most cards share."""
-    layers = {}
+    """Every card on the whole SHELF (not only the table - like find_me does) except the walls.
+    The walls are the layer that most table cards share."""
+    if not records:
+        return []
+    table_layers = []
     for record in records:
         try:
-            layers[record] = read_u32(mem, record + LAYER)
+            table_layers.append(read_u32(mem, record + LAYER))
         except OSError:
             continue
-    if not layers:
+    if not table_layers:
         return []
-    wall = Counter(layers.values()).most_common(1)[0][0]
-    return [record for record, layer in layers.items() if layer != wall]
+    wall = Counter(table_layers).most_common(1)[0][0]
+    cards = []
+    for card in range(min(records) - 64 * RECORD, max(records) + 64 * RECORD + 1, RECORD):
+        try:
+            if read_u32(mem, card + LAYER) != wall:
+                cards.append(card)
+        except OSError:
+            continue  # junk memory past the ends of the shelf
+    return cards
 
 
 history = deque()  # (time, lines of text), oldest first

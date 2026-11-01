@@ -245,3 +245,23 @@ def find_rules(copies, first, second, you, movers):
             seen.add(g[5])
             unique.append(g[:5])
     return unique
+
+
+def shelf_cards(mem, records):
+    """Cards on the shelf around the table's cards (also NOT in the table) that stand at a real position."""
+    if not records:
+        return []
+    cards = []
+    for card in range(
+        min(records) - 64 * RECORD, max(records) + 64 * RECORD + 1, RECORD
+    ):
+        try:
+            x, y = read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF)
+        except OSError:
+            continue  # junk memory past the ends of the shelf
+        # TODO: the same junk check table_records does - only then add the card
+        ...
+        if 0.01 < abs(x) < 100000 and 0.01 < abs(y) < 100000:
+            cards.append(card)
+
+    return cards

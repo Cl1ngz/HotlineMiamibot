@@ -8,8 +8,17 @@ import sys
 import time
 
 from core import lockon
-from core.enemies import find_aim, find_me, is_enemy, load_rules
-from core.hands import KEY_SPACE, key_down, key_up, look_at, press, release
+from core.enemies import find_aim, find_me_card, is_enemy, load_rules, shelf_cards
+from core.hands import (
+    KEY_SPACE,
+    key_down,
+    key_up,
+    look_at,
+    press_left,
+    press_right,
+    release_left,
+    release_right,
+)
 from core.legs import hold, keys_toward, next_point
 from core.memory import (
     X_OFF,
@@ -21,8 +30,10 @@ from core.memory import (
     table_cards,
     table_records,
 )
-from core.path import find_path
-from core.walls import find_walls, wall_lines
+from core.path import blocked_cells, cell_of, find_path
+from core.stairs import find_stairs
+from core.walls import can_see, fake_door_boxes, find_walls, wall_boxes, wall_lines
+from core.weapons import find_weapons, load_names
 
 FPS = 60  # the game runs at 60 frames per second, no point going faster
 SCAN_EVERY = 0.25  # seconds between the slow part: finding enemies and walls
@@ -41,6 +52,16 @@ EXECUTE_REACH = 35
 MOUNTED_FOR = 2.0  # seconds after SPACE we keep hitting even without seeing you
 # seconds between two searches for the way
 REPLAN = 0.5
+# your card +0xA0 when your hands are empty: at rest / punching
+# (measured so far: 0x1 empty -> 0x13 after picking up the bat. Check knife, pipe, golf club with pickup!)
+EMPTY_HANDS = (0x1, 0x85)
+# this close to a weapon -> right click picks it up (the press test worked at 13)
+GRAB_REACH = 10
+# after a right click wait this long: +0xA0 changes a moment later, and a 2nd click would THROW the weapon
+GRAB_COOLDOWN = 0.5
+# the goal is this close and you can see it -> walk straight there, no path (the path ends in the
+# MIDDLE of a 16x16 cell - up to 11 away from the weapon, too far to pick it up)
+STRAIGHT = 32
 
 
 def status(text):
@@ -64,6 +85,19 @@ def where(mem, cards, alive):
     return spots
 
 
+def choose_weapon(weapons, you, enemy_far, lines):
+    """The weapon to go for, (x, y), or None.
+    Only weapons you can see, and only if the nearest one is closer than the enemy (enemy_far = math.inf: no enemy).
+    """
+    seen = [xy for xy in weapons if can_see(you, xy, lines)]
+    if not seen:
+        return None
+    nearest = min(seen, key=lambda xy: math.dist(xy, you))
+    if math.dist(nearest, you) > enemy_far:
+        return None
+    return nearest
+
+
 def wait_for_game(mem):
     """Wait until  you're in a level."""
     while not (find_aim(mem)):
@@ -79,6 +113,7 @@ def wait_for_game(mem):
 mem, regions, static_regions = attach()
 mem_rw = open_rw()
 rules = load_rules()
+names = load_names()  # weapon frame -> {"name": ..., "kind": ...}
 if not rules:
     raise SystemExit("no enemy rules yet - run python -m tools.obj_kinds first")
 stop_at = time.monotonic() + float(sys.argv[1]) if len(sys.argv) > 1 else math.inf
@@ -100,21 +135,39 @@ try:
     # when to swing again
     next_swing = 0
     path, next_plan = None, 0
+    stairs = None
+    blocked = set()  # cells your middle can't stand in (walls and sofas)
+    weapons = []  # (x, y) of melee weapons lying on the floor
+    # when to let go of the right button / when we may right click again
+    right_up_at, next_grab = None, 0
     while time.monotonic() < stop_at:
         now = time.monotonic()
         if release_at is not None and now >= release_at:
-            release(mem, mem_rw)
+            release_left(mem, mem_rw)
             release_at = None
         if space_up_at is not None and now >= space_up_at:
             key_up(mem, mem_rw, KEY_SPACE)
             space_up_at = None
+        if right_up_at is not None and now >= right_up_at:
+            release_right(mem, mem_rw)
+            right_up_at = None
 
         # --- see ---
         try:
             if now >= next_scan:
                 records = table_records(mem)
-                enemies = {r for r in records if is_enemy(mem, r, rules)}
+                enemies = {
+                    r for r in shelf_cards(mem, records) if is_enemy(mem, r, rules)
+                }
                 lines = wall_lines(find_walls(mem, records, rules))
+                boxes = wall_boxes(mem, records, rules) + fake_door_boxes(mem, records)
+                blocked = blocked_cells(boxes)
+                stairs = find_stairs(mem, records)
+                weapons = [
+                    (x, y)
+                    for x, y, frame in find_weapons(mem)
+                    if names.get(frame, {}).get("kind") == "melee"
+                ]
                 next_scan = now + SCAN_EVERY
             # cards that weren't in the table last frame (someone stood up, a new enemy came in):
             # check them NOW instead of waiting for the next scan
@@ -123,14 +176,16 @@ try:
                 if is_enemy(mem, card, rules):
                     enemies.add(card)
             known_cards = cards
-            you = find_me(mem)
-            if you is None:
+            me = find_me_card(mem)
+            if me is None:
                 raise OSError("no player found")
+            you = (read_double(mem, me + X_OFF), read_double(mem, me + Y_OFF))
+            hand = read_kind(mem, me, 0, 0xA0)  # what you hold (EMPTY_HANDS = nothing)
         except OSError as err:
             if now < mounted_until:
                 # sitting on him: we can't see you, but we know what's going on - keep hitting
                 if release_at is None and now >= next_swing:
-                    press(mem, mem_rw)
+                    press_left(mem, mem_rw)
                     release_at = now + HOLD
                     next_swing = now + COOLDOWN
                 status("MOUNTED - hitting")
@@ -138,6 +193,8 @@ try:
                 held = hold(mem, mem_rw, set(), held)
                 continue
             lockon.reset()  # menu / new floor: forget the old target
+            stairs = None  # new floor: the old stairs are not ours any more
+            next_scan = 0  # look at the new floor right away
             status(f"{err} (paused)")
             time.sleep(0.2)
             held = hold(mem, mem_rw, set(), held)
@@ -146,8 +203,15 @@ try:
         # --- decide ---
         # only cards that are STILL enemies right now - a shell or a body drops out at once
         still_enemies = [card for card in enemies if is_enemy(mem, card, rules)]
-        spots = lockon.visible_enemies(mem, still_enemies, cards, you, lines)
+        alive = set(
+            still_enemies
+        )  # every card that is an enemy RIGHT NOW - from the table or the shelf
+        spots = lockon.visible_enemies(mem, still_enemies, alive, you, lines)
         target = lockon.choose_target(mem, spots, you, rules)
+        enemy_far = math.dist(spots[target], you) if target is not None else math.inf
+        grab = None  # the weapon we go for
+        if hand in EMPTY_HANDS:
+            grab = choose_weapon(weapons, you, enemy_far, lines)
 
         # --- act ---
         if target is None:
@@ -166,36 +230,56 @@ try:
                     next_swing = now + COOLDOWN
                     mounted_until = now + MOUNTED_FOR
             elif far < REACH and release_at is None and now >= next_swing:
-                press(mem, mem_rw)
+                press_left(mem, mem_rw)
                 release_at = now + HOLD
                 next_swing = now + COOLDOWN
             status(
                 f"LOCKED on {'LYING' if lying else 'standing'} enemy {far:3.0f} away ({len(spots)} in sight)"
             )
+        if grab is not None:
+            # TODO 3: close enough (GRAB_REACH)? right button free (right_up_at)? GRAB_COOLDOWN over (next_grab)?
+            #   -> press_right, and set right_up_at and next_grab (look at the left click a few lines up)
+            if (
+                math.dist(grab, you) < GRAB_REACH
+                and right_up_at is None
+                and now >= next_grab
+            ):
+                press_right(mem, mem_rw)
+                right_up_at = now + HOLD
+                next_grab = now + GRAB_COOLDOWN
+            status(f"GRABBING a weapon {math.dist(grab, you):3.0f} away")
         # --- walk ---
         goal = None  # where to go
         close_enough = REACH  # this close - stop walking
         target_spot = spots.get(target)
-        if target_spot is not None:
+        if grab is not None:
+            goal = grab  # empty hands: the weapon first
+            close_enough = GRAB_REACH
+        elif target_spot is not None:
             goal = target_spot
             close_enough = (
                 EXECUTE_REACH if read_kind(mem, target, 0, 0x14) == LYING else REACH
             )
         else:
-            hidden = where(
-                mem, still_enemies, cards
-            )  # every enemy, also behind the walls
+            # every enemy, also behind the walls
+            hidden = where(mem, still_enemies, alive)
             if hidden:
                 goal = min(hidden.values(), key=lambda xy: math.dist(xy, you))
+            elif stairs is not None:
+                goal = stairs  # floor clear: go to GO!
+                close_enough = 0  # walk right onto it
         keys = set()
         if goal is not None and math.dist(goal, you) > close_enough:
-            if now >= next_plan:
-                path = find_path(you, goal, lines)
-                next_plan = now + REPLAN
-            if path is not None:
-                point = next_point(path, you)
-                if point is not None:
-                    keys = keys_toward(you, point)
+            if math.dist(goal, you) < STRAIGHT and can_see(you, goal, lines):
+                keys = keys_toward(you, goal)  # the last bit: straight there, no path
+            else:
+                if now >= next_plan:
+                    path = find_path(you, goal, blocked)
+                    next_plan = now + REPLAN
+                if path is not None:
+                    point = next_point(path, you)
+                    if point is not None:
+                        keys = keys_toward(you, point)
         held = hold(mem, mem_rw, keys, held)
 
         # ms spent on see + decide + act in this loop
@@ -212,7 +296,8 @@ except KeyboardInterrupt:
     pass
 finally:
     print("\nbye!")
-    release(mem, mem_rw)
+    release_left(mem, mem_rw)
+    release_right(mem, mem_rw)
     key_up(mem, mem_rw, KEY_SPACE)
     hold(mem, mem_rw, set(), held)
     print(f"slowest loop: {slowest:.1f} ms")

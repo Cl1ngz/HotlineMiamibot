@@ -14,8 +14,8 @@ from core.enemies import find_aim, find_me, load_rules
 from core.hands import KEY_A, KEY_D, KEY_S, KEY_W
 from core.legs import REACHED, hold, keys_toward, next_point
 from core.memory import attach, open_rw, table_records, wait
-from core.path import find_path
-from core.walls import find_walls, wall_lines
+from core.path import blocked_cells, find_path
+from core.walls import fake_door_boxes, wall_boxes
 
 REPLAN = 0.5  # seconds between two searches for the way
 GIVE_UP = 15  # seconds
@@ -34,7 +34,9 @@ wait("put the crosshair AROUND A CORNER (where you want to go), then hands OFF t
 goal = find_aim(mem)
 if goal is None or find_me(mem) is None:
     raise SystemExit("can't find you or the crosshair - are you in a level?")
-lines = wall_lines(find_walls(mem, table_records(mem), rules))
+records = table_records(mem)
+# walls, sofas and the doors that never open
+blocked = blocked_cells(wall_boxes(mem, records, rules) + fake_door_boxes(mem, records))
 print(f"goal: {goal[0]:.0f},{goal[1]:.0f}")
 
 held = set()
@@ -56,7 +58,7 @@ try:
             print(f"\nARRIVED in {now - started:.1f} s")
             break
         if now >= next_plan:
-            path = find_path(you, goal, lines)
+            path = find_path(you, goal, blocked)
             next_plan = now + REPLAN
             if path is None:
                 print("\nNO WAY to the crosshair")
