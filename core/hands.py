@@ -25,6 +25,29 @@ BUTTON = ([0x42C, 0x9C], 0x52D)
 HELD = b"\x80"
 RELEASED = b"\x00"
 
+KEYBOARD = ([0x2B4, 0x14], 0x521)  # DirectInput's keyboard row: 256 bytes, one per key
+# DirectInput's number for every key we use = its place in the row
+KEY_SPACE = 0x39
+KEY_W = 0x11
+KEY_A = 0x1E
+KEY_S = 0x1F
+KEY_D = 0x20
+KEY_R = 0x13
+
+
+def key_down(mem, mem_rw, key):
+    """Hold a key (one of the KEY_ numbers above)."""
+    # TODO: follow KEYBOARD -> that's the START of the row; the key's byte is start + key; write HELD there
+    ...
+    os.pwrite(mem_rw, HELD, follow(mem, KEYBOARD) + key)
+
+
+def key_up(mem, mem_rw, key):
+    """Let go of a key."""
+    # TODO
+    ...
+    os.pwrite(mem_rw, RELEASED, follow(mem, KEYBOARD) + key)
+
 
 def follow(mem, chain):
     """Where a chain ends: start at GAME, follow a link through every offset, add the last number at the end."""

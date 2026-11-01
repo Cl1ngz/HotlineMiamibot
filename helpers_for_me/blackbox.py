@@ -10,11 +10,16 @@
 # It keeps only the last KEEP seconds. When you die it saves them to blackbox_1.txt, blackbox_2.txt...
 # Ctrl+C saves the last seconds too - for moments that aren't a death (e.g. the enemy knocked down by a door).
 #
-#   python -m helpers_for_me.blackbox       (hmbot in another terminal, then play; send me the .txt files)
+# "near" mode: instead of rule-matching objects, write down EVERY object closer than NEAR_RANGE
+# (except you and the walls) - for things our rules don't know yet, like a freshly knocked-down enemy.
+#
+#   python -m helpers_for_me.blackbox         (hmbot in another terminal, then play; send me the .txt files)
+#   python -m helpers_for_me.blackbox near    (everything right around you)
 import math
 import subprocess
+import sys
 import time
-from collections import deque
+from collections import Counter, deque
 
 from core.enemies import find_me_card, is_enemy, load_rules, matches
 from core.hands import LOOK_X, LOOK_Y, follow
@@ -22,9 +27,10 @@ from core.memory import X_OFF, Y_OFF, attach, read_double, read_u32, table_cards
 from core.walls import can_see, find_walls, wall_lines
 
 EVERY = 1 / 30  # seconds between two samples
-KEEP = 3  # seconds of history to save
+KEEP = 8  # seconds of history to save
 SCAN_EVERY = 0.25  # seconds between looking for new enemy cards (like hmbot)
-RANGE = 250  # only write down things this close to you (lockon's MAX_RANGE)
+NEAR = len(sys.argv) > 1 and sys.argv[1] == "near"
+RANGE = 60 if NEAR else 250  # only write down things this close to you (250 = lockon's MAX_RANGE)
 LAYER = 0x14
 SWING = 0xA0
 EXTRA = (0x10, 0xA4, 0xB4)  # card offsets we're unsure about - shown for every enemy
@@ -85,7 +91,7 @@ def sample(candidates, lines):
     text = [f"you ({you[0]:4.0f},{you[1]:4.0f})  look {look_text}  swing +0xA0 {read_u32(mem, me + SWING):#x}"]
     alive = table_cards(mem)
     for card in candidates:
-        if card in alive:
+        if card in alive and card != me:
             line = describe(card, you, look, lines)
             if line is not None:
                 text.append(line)
@@ -104,6 +110,20 @@ def save(history, number):
     notify(f"saved the last {KEEP} s to {name}")
 
 
+def everything_but_walls(records):
+    """Every card except the walls: the walls are the layer that most cards share."""
+    layers = {}
+    for record in records:
+        try:
+            layers[record] = read_u32(mem, record + LAYER)
+        except OSError:
+            continue
+    if not layers:
+        return []
+    wall = Counter(layers.values()).most_common(1)[0][0]
+    return [record for record, layer in layers.items() if layer != wall]
+
+
 history = deque()  # (time, lines of text), oldest first
 saved = 0
 was_in_game = False
@@ -116,7 +136,10 @@ try:
         try:
             if now >= next_scan:
                 records = table_records(mem)
-                candidates = [r for r in records if any(matches(mem, r, *rule) for rule in rules)]
+                if NEAR:
+                    candidates = everything_but_walls(records)
+                else:
+                    candidates = [r for r in records if any(matches(mem, r, *rule) for rule in rules)]
                 lines = wall_lines(find_walls(mem, records, rules))
                 next_scan = now + SCAN_EVERY
             text = sample(candidates, lines)

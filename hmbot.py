@@ -9,8 +9,8 @@ import time
 
 from core import lockon
 from core.enemies import find_aim, find_me, is_enemy, load_rules
-from core.hands import look_at, press, release
-from core.memory import attach, open_rw, table_cards, table_records
+from core.hands import KEY_SPACE, key_down, key_up, look_at, press, release
+from core.memory import attach, open_rw, read_kind, table_cards, table_records
 from core.walls import find_walls, wall_lines
 
 FPS = 60  # the game runs at 60 frames per second, no point going faster
@@ -20,7 +20,14 @@ REACH = 35
 # seconds to hold the leftbutton
 HOLD = 0.15
 # seconds betwen two swings
-COOLDOWN = 0.4
+COOLDOWN = 0.25
+# a lying enemy: a swing does nothing to him, SPACE finishes him
+# card +0x14 of a lying enemy (-100, as read_kind/read_u32 sees it)
+LYING = 0xFFFFFF9C
+# stand this close (on top of him) - a guess, we'll check it with the blackbox/
+EXECUTE_REACH = 35
+# after SPACE you sit on him: the game hides your card (no player found) and you finish him with the LEFT button
+MOUNTED_FOR = 2.0  # seconds after SPACE we keep hitting even without seeing you
 
 
 def status(text):
@@ -47,6 +54,7 @@ if not rules:
     raise SystemExit("no enemy rules yet - run python -m tools.obj_kinds first")
 stop_at = time.monotonic() + float(sys.argv[1]) if len(sys.argv) > 1 else math.inf
 
+slowest = 0
 try:
     wait_for_game(mem)
     enemies, lines = set(), []
@@ -54,6 +62,10 @@ try:
     next_scan = 0
     # when to let go of the button
     release_at = None
+    # when to let go of SPACE
+    space_up_at = None
+    # until when we think you're sitting on an enemy
+    mounted_until = 0
     # when to swing again
     next_swing = 0
     while time.monotonic() < stop_at:
@@ -61,6 +73,9 @@ try:
         if release_at is not None and now >= release_at:
             release(mem, mem_rw)
             release_at = None
+        if space_up_at is not None and now >= space_up_at:
+            key_up(mem, mem_rw, KEY_SPACE)
+            space_up_at = None
 
         # --- see ---
         try:
@@ -77,12 +92,18 @@ try:
                     enemies.add(card)
             known_cards = cards
             you = find_me(mem)
-            aim = find_aim(mem)
-            if aim is None:
-                raise OSError("no crosshair found")
             if you is None:
                 raise OSError("no player found")
         except OSError as err:
+            if now < mounted_until:
+                # sitting on him: we can't see you, but we know what's going on - keep hitting
+                if release_at is None and now >= next_swing:
+                    press(mem, mem_rw)
+                    release_at = now + HOLD
+                    next_swing = now + COOLDOWN
+                status("MOUNTED - hitting")
+                time.sleep(1 / FPS)  # not 0.2 s like a pause - every frame counts here
+                continue
             lockon.reset()  # menu / new floor: forget the old target
             status(f"{err} (paused)")
             time.sleep(0.2)
@@ -101,14 +122,30 @@ try:
             look_at(mem, mem_rw, spots[target])
             # if close enought? and button free? and cooldown over?
             far = math.dist(spots[target], you)
-            if far < REACH and (release_at is None) and now >= next_swing:
+            lying = read_kind(mem, target, 0, 0x14) == LYING
+            if lying:
+                # on the floor: stand on him and press SPACE (like a click: hold a moment, then let go)
+                if far < EXECUTE_REACH and space_up_at is None and now >= next_swing:
+                    key_down(mem, mem_rw, KEY_SPACE)
+                    print(f"\nSPACE! far {far:.0f}")
+                    space_up_at = now + HOLD
+                    next_swing = now + COOLDOWN
+                    mounted_until = now + MOUNTED_FOR
+            elif far < REACH and release_at is None and now >= next_swing:
                 press(mem, mem_rw)
                 release_at = now + HOLD
                 next_swing = now + COOLDOWN
-
-            status(f"LOCKED on enemy {far:3.0f} away ({len(spots)} in sight)")
+            status(
+                f"LOCKED on {'LYING' if lying else 'standing'} enemy {far:3.0f} away ({len(spots)} in sight)"
+            )
 
         # time.sleep(1 / FPS)
+        work = (
+            time.monotonic() - now
+        ) * 1000  # ms spent on see + decide + act in this loop
+        slowest = max(slowest, work)
+        if work > 1000 / FPS:
+            print(f"\nslow loop: {work:.1f} ms")
         frame_end = now + 1 / FPS
         while time.monotonic() < frame_end:
             if target is not None:
@@ -119,3 +156,5 @@ except KeyboardInterrupt:
 finally:
     print("\nbye!")
     release(mem, mem_rw)
+    key_up(mem, mem_rw, KEY_SPACE)
+    print(f"slowest loop: {slowest:.1f} ms")
