@@ -49,7 +49,8 @@ stop_at = time.monotonic() + float(sys.argv[1]) if len(sys.argv) > 1 else math.i
 
 try:
     wait_for_game(mem)
-    enemies, lines = [], []
+    enemies, lines = set(), []
+    known_cards = set()  # every card that was in the table last frame
     next_scan = 0
     # when to let go of the button
     release_at = None
@@ -65,9 +66,16 @@ try:
         try:
             if now >= next_scan:
                 records = table_records(mem)
-                enemies = [r for r in records if is_enemy(mem, r, rules)]
+                enemies = {r for r in records if is_enemy(mem, r, rules)}
                 lines = wall_lines(find_walls(mem, records, rules))
                 next_scan = now + SCAN_EVERY
+            # cards that weren't in the table last frame (someone stood up, a new enemy came in):
+            # check them NOW instead of waiting for the next scan
+            cards = table_cards(mem)
+            for card in cards - known_cards:
+                if is_enemy(mem, card, rules):
+                    enemies.add(card)
+            known_cards = cards
             you = find_me(mem)
             aim = find_aim(mem)
             if aim is None:
@@ -81,7 +89,9 @@ try:
             continue
 
         # --- decide ---
-        spots = lockon.visible_enemies(mem, enemies, table_cards(mem), you, lines)
+        # only cards that are STILL enemies right now - a shell or a body drops out at once
+        still_enemies = [card for card in enemies if is_enemy(mem, card, rules)]
+        spots = lockon.visible_enemies(mem, still_enemies, cards, you, lines)
         target = lockon.choose_target(mem, spots, you, rules)
 
         # --- act ---
@@ -108,3 +118,4 @@ except KeyboardInterrupt:
     pass
 finally:
     print("\nbye!")
+    release(mem, mem_rw)

@@ -6,9 +6,17 @@ import sys
 import time
 
 import core.enemies
-from core.enemies import (copy_memory, find_aim_card, find_me_card, find_rules,
-                          is_enemy, load_rules, matches, save_alive_checks,
-                          save_rules)
+from core.enemies import (
+    copy_memory,
+    find_aim_card,
+    find_me_card,
+    find_rules,
+    is_enemy,
+    load_rules,
+    matches,
+    save_dead_checks,
+    save_rules,
+)
 from core.memory import X_OFF, Y_OFF, attach, read_double, table_records, wait
 
 GUESS_FILE = "enemy_guesses.json"
@@ -73,7 +81,8 @@ def dogs(mem, you, aim):
             "need at least 2 of them - are the dogs alive and running? (press R and try again)"
         )
     return find_rules(
-        copy_memory(mem, now), runners[:1], runners[1:2], you, set(run)
+        copy_memory(mem, now), runners[:1], runners[1:2], you, set(runners)
+    )
 
 
 def dead(mem, you, aim):
@@ -199,12 +208,12 @@ else:
             f"{i:3}  {PLACES[where]:6} {hex(offset):>7} {hex(value):>13} {hex(mine):>10}{mark}"
         )
     where, offset, value, mine = guesses[pick]
-    load_rules()  # also loads the current alive checks
-    checks = enemies.alive_checks
+    load_rules()  # also loads the current dead checks
+    checks = core.enemies.dead_checks
     if "--pick" in sys.argv:
         checks = checks[:-1]  # swap out the last check
-    checks.append((tuple(last["kind"]), (where, offset, value)))
-    save_alive_checks(checks)
+    checks.append((tuple(last["kind"]), (where, offset, mine)))
+    save_dead_checks(checks)
     print(
         f"\nsaved guess #{pick}: the body should stop being orange, living enemies should stay orange."
     )

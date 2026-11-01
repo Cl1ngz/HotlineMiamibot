@@ -122,7 +122,7 @@ def find_aim(mem):
 
 
 # [(kind rule, check), ...] - filled in by load_rules(), used by is_enemy()
-alive_checks = []
+dead_checks = []
 
 
 # flat list addresses.json
@@ -135,15 +135,15 @@ def read_flat(name):
 
 
 def load_rules():
-    global alive_checks
+    global dead_checks
 
-    # read the alive checks first, so is_enemy() can use them
-    flat = read_flat("alive")
-    alive_checks = []
+    # read the dead checks first, so is_enemy() can use them
+    flat = read_flat("dead")
+    dead_checks = []
     for i in range(0, len(flat) - 5, 6):
         kind = tuple(flat[i : i + 3])
         check = tuple(flat[i + 3 : i + 6])
-        alive_checks.append((kind, check))
+        dead_checks.append((kind, check))
 
     # read the enemy rules
     flat = read_flat("enemy")
@@ -157,8 +157,8 @@ def save_rules(rules):
     save_address("enemy", [number for rule in rules for number in rule])
 
 
-def save_alive_checks(checks):
-    save_address("alive", [number for kind, check in checks for number in kind + check])
+def save_dead_checks(checks):
+    save_address("dead", [number for kind, check in checks for number in kind + check])
 
 
 def matches(mem, record, where, offset, value):
@@ -171,9 +171,9 @@ def matches(mem, record, where, offset, value):
 def is_enemy(mem, record, rules):
     for rule in rules:
         if matches(mem, record, *rule):
-            return all(
+            return not any(
                 matches(mem, record, *check)
-                for kind, check in alive_checks
+                for kind, check in dead_checks
                 if kind == rule
             )
     return False
