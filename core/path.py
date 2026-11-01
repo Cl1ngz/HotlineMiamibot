@@ -6,7 +6,7 @@
 # so when the water reaches the goal we follow those "came from" arrows back to you.
 #
 #   find_path(start, goal, lines)  ->  [(x, y), ...] points to walk through, start to goal  (None = no way)
-from collections import deque
+from collections import defaultdict, deque
 
 from .walls import can_see
 
@@ -16,6 +16,30 @@ CELL = 16
 MAX_CELLS = 5000
 # right, left, down, up
 STEPS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+# size of one chunk for the wall lines(1x wall pice)
+CHUNK = 32
+
+
+def chunks(lines):
+    """Sort the wall lines into chuns by their middle point: {(chunk x, chunk y): [lines]}."""
+    found = defaultdict(list)
+    for line in lines:
+        (x1, y1), (x2, y2) = line
+        # the middle of the line
+        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+        found[(int(mx // CHUNK), int(my // CHUNK))].append(line)
+
+    return found
+
+
+def lines_near(found, point):
+    """The wall lines from the chunks of point and the 8 chunks around it."""
+    bx, by = int(point[0] // CHUNK), int(point[1] // CHUNK)  # the chunk of point
+    near = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            near.extend(found.get((bx + dx, by + dy), []))
+    return near
 
 
 def cell_of(xy):
@@ -30,6 +54,7 @@ def middle(cell):
 
 def find_path(start, goal, lines):
     """Shortest way from start to goal around the walls, as a list of points. None if there's none."""
+    found = chunks(lines)
     start_cell, goal_cell = cell_of(start), cell_of(goal)
     # cell -> the cell its water came from (the arrow)
     came_from = {start_cell: None}
@@ -43,7 +68,7 @@ def find_path(start, goal, lines):
             nxt = (here[0] + dx, here[1] + dy)
             if nxt in came_from:
                 continue
-            if not can_see(middle(here), middle(nxt), lines):
+            if not can_see(middle(here), middle(nxt), lines_near(found, middle(here))):
                 continue
             came_from[nxt] = here
             wave.append(nxt)
