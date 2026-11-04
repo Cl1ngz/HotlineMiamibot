@@ -15,9 +15,6 @@ MAX_BOX = 512
 # a door that NEVER opens (floor 2): floor layer + this folder picture, a 4 x 32 plank
 FLOOR = 0xFFFFFF9C
 FAKE_DOOR = 0x20
-# a door that opens: its own layer + this folder picture. Its x, y is the HINGE (the end it turns around)
-REAL_DOOR_LAYER = 0x15
-REAL_DOOR = 0x67
 # the wall layer (walls AND sofas) - the same on every floor so far
 WALL = 0x9
 

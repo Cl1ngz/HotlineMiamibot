@@ -3,7 +3,6 @@
 import math
 import os
 import time
-from collections import defaultdict
 
 from .memory import (
     X_OFF,
@@ -19,7 +18,6 @@ from .memory import (
 # 4bytes (X at +0x50, Y at +0x58)
 RECORD = 0xB8
 INSTANCE = 0x6D0  # bytes in the bigger object behind the record's first pointer
-MAX_ENEMIES = 40  # a floor never has more enemies of one kind than this
 
 
 def find_me_card(mem):
@@ -193,60 +191,6 @@ def copy_memory(mem, records):
     return copies
 
 
-# Spots where an object first and second share a value that you and the walls don't.
-# Returns guesses best first: [[where, offset, value, objects, walking], ...]
-def find_rules(copies, first, second, you, movers):
-    first = [r for r in first if r in copies]
-    second = [r for r in second if r in copies]
-    if not first or not second:
-        raise SystemExit("couldn't read those objects (did they die?) - run again")
-
-    guesses = []
-    for where in range(2):
-        for offset in range(0, len(copies[first[0]][where]), 4):
-            # skip X and Y on the card - positions aren't kinds
-            if where == 0 and X_OFF <= offset < X_OFF + 16:
-                continue
-            # group the objects by the 4 bytes they have here
-            groups = defaultdict(set)
-            for record, data in copies.items():
-                groups[int.from_bytes(data[where][offset : offset + 4], "little")].add(
-                    record
-                )
-            if len(groups) > 60:
-                # different for almost every object: an id or a pointer, not a kind
-                continue
-                # the biggest group = walls
-            walls = max(groups, key=lambda v: len(groups[v]))
-            for value, group in groups.items():
-                # filter out walls, you and too many enemies
-                if value == walls or you in group or len(group) > MAX_ENEMIES:
-                    continue
-                # final test and save
-                if group & set(first) and group & set(second):
-                    guesses.append(
-                        [
-                            where,
-                            offset,
-                            value,
-                            len(group),
-                            len(group & movers),
-                            frozenset(group),
-                        ]
-                    )
-
-    # best first: holds the most walkers, then whole numbers (kinds are small), then the smallest group
-    guesses.sort(key=lambda g: (-g[4], not 0 < g[2] < 10000, g[3]))
-    # different spots that pick out exactly the same objects count as one guess
-    seen = set()
-    unique = []
-    for g in guesses:
-        if g[5] not in seen:
-            seen.add(g[5])
-            unique.append(g[:5])
-    return unique
-
-
 def shelf_cards(mem, records):
     """Cards on the shelf around the table's cards (also NOT in the table) that stand at a real position."""
     if not records:
@@ -259,9 +203,7 @@ def shelf_cards(mem, records):
             x, y = read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF)
         except OSError:
             continue  # junk memory past the ends of the shelf
-        # TODO: the same junk check table_records does - only then add the card
-        ...
+        # the same junk check table_records does
         if 0.01 < abs(x) < 100000 and 0.01 < abs(y) < 100000:
             cards.append(card)
-
     return cards

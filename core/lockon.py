@@ -6,9 +6,8 @@
 #   choose_target(mem, spots, you, rules)          every frame: which one do we aim at?
 #   reset()                                        forget the target (new floor, you died...)
 import math
-import time
 
-from .enemies import find_aim, is_enemy
+from .enemies import is_enemy
 from .memory import X_OFF, Y_OFF, read_double
 from .walls import can_see
 
@@ -25,7 +24,7 @@ last_xy = None
 
 
 def visible_enemies(mem, enemies, alive, you, lines):
-    """{card: (x, y)} of the enemies still in the table, close to you and not behind a wall."""
+    """{card: (x, y)} of the enemies still alive (table or shelf), close to you and not behind a wall."""
     spots = {}
     for card in enemies:
         if card not in alive:

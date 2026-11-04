@@ -1,6 +1,5 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
 import json
-import math
 import os
 import struct
 import subprocess
@@ -17,10 +16,6 @@ Y_OFF = (
 
 GAME_NAME = "hotline"
 ADDRESS_FILE = "addresses.json"
-
-# experimen find_me.py
-# PLAYER_KIND = 0x2C  # hides when dead
-# AIM_KIND = 0xAF  # closer is the one
 
 
 def find_game():
@@ -101,47 +96,6 @@ def write_double(mem, address, value):
     os.pwrite(mem, code, address)
 
 
-def narrow(mem, candidates, how):
-    new_candidates = {}
-    for addr, old in candidates.items():
-        try:
-            new = read_double(mem, addr)
-        except OSError:
-            # memory freed = drop it
-            continue
-        if how == "up":
-            keep = new > old
-        elif how == "down":
-            keep = new < old
-        elif how == "same":
-            keep = new == old
-        else:
-            raise ValueError(f"unknown how: {how}")
-        if keep:
-            new_candidates[addr] = new
-    return new_candidates
-
-
-def first_scan(mem, regions, prompt, ask=input):
-    before = take_snapshot(mem, regions)
-    ask(prompt)
-    after = take_snapshot(mem, regions)
-
-    candidates = {}
-    for start in before:
-        if start not in after or len(before[start]) != len(after[start]):
-            continue
-        a = np.frombuffer(before[start], dtype="<f8")
-        b = np.frombuffer(after[start], dtype="<f8")
-        went_up = b > a
-        looks_ok = (np.abs(b) > 0.01) & (np.abs(b) < 100000)
-        both = went_up & looks_ok
-        for i in np.flatnonzero(both):
-            candidates[start + int(i) * 8] = b[i]
-
-    return candidates
-
-
 def attach():
     game = find_game()
     if game is None:
@@ -180,18 +134,6 @@ def wait(text, seconds=4):
         print(f"  {s}...", end="\r", flush=True)
         time.sleep(1)
     print("  scanning!")
-
-
-def safe_read(mem, address):
-    try:
-        return read_double(mem, address)
-    except OSError:
-        return math.nan
-
-
-def nearby(mem, x_addr):
-    # look in range(-64, 72, 8)
-    return {off: safe_read(mem, x_addr + off) for off in range(-0x40, 0x48, 8)}
 
 
 def save_address(name, value):

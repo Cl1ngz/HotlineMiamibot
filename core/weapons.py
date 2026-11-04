@@ -2,10 +2,11 @@
 # weapons.py - weapons lying on the floor
 #
 # A weapon on the floor = a card on the floor layer (-100) with picture 0x15.
-# The frame number at card +0x98 says which weapon it is (names: weapon_names.json, made by name_weapon.py).
+# The frame number at card +0x98 says which weapon it is (names: weapon_names.json, made by tools/weapon_tool.py).
+# A goal (the briefcase...) = a card on the floor layer with its own picture (GOAL).
 import json
 
-from .enemies import RECORD
+from .enemies import shelf_cards
 from .memory import X_OFF, Y_OFF, read_double, read_kind, table_records
 
 # layer -100: things lying on the floor
@@ -15,6 +16,8 @@ MARK = 0x15
 # where the frame number (= which weapon) sits in the card
 FRAME = 0x98
 NAMES_FILE = "weapon_names.json"
+# the picture of a goal to take for the level: the briefcase (there are 4-5 such things - more to find)
+GOAL = 0xCB
 
 
 def load_names():
@@ -28,11 +31,8 @@ def load_names():
 
 def find_weapons(mem):
     """[(x, y, frame), ...] for every weapon lying on the floor."""
-    cards = table_records(mem)
-    if not cards:
-        return []
     found = []
-    for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
+    for card in shelf_cards(mem, table_records(mem)):
         try:
             # the weapon signature: layer FLOOR and picture MARK
             if (
@@ -48,16 +48,10 @@ def find_weapons(mem):
     return found
 
 
-GOAL = 0xCB
-
-
 def find_goals(mem):
     """[(x, y), ...] for every goal (the briefcase...) lying on the floor."""
-    cards = table_records(mem)
-    if not cards:
-        return []
     found = []
-    for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
+    for card in shelf_cards(mem, table_records(mem)):
         try:
             # the goal signature: layer FLOOR and picture GOAL
             if (

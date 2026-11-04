@@ -5,12 +5,15 @@
 # that start at a fixed locker inside the game file (GAME) - they still work after you die or restart.
 #   [GAME] -> +0x3F4 -> +0x460  then +0x8      the look X: where your character looks (a double)
 #   [GAME] -> +0x3F4 -> +0x438  then +0x8      the look Y
-#   [GAME] -> +0x42C -> +0x9C   then +0x52D    the left mouse button in DirectInput (0x80 held, 0 released)
+#   [GAME] -> +0x42C -> +0x9C   then +0x52D    the left mouse button in DirectInput (0x80 held, 0 released),
+#                                              +0x52E is the right one
+#   [GAME] -> +0x2B4 -> +0x14   then +0x521    the keyboard row: 256 bytes, one per key (KEY_ numbers below)
 #
 # hmbot uses it like this:
-#   look_at(mem, mem_rw, xy)     every frame: your character looks at xy (the game puts the mouse back every frame)
-#   press(mem, mem_rw)           hold the left button
-#   release(mem, mem_rw)         let it go
+#   look_at(mem, mem_rw, xy)                 every frame: your character looks at xy (the game puts the mouse back)
+#   press_left / release_left(mem, mem_rw)   hold / let go of the left button (swing, shoot)
+#   press_right / release_right(...)         the right button (pick up / throw)
+#   key_down / key_up(mem, mem_rw, KEY_W)    hold / let go of a key (core/legs.py walks with them)
 import os
 
 from .memory import read_u32, write_double
