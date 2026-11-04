@@ -32,8 +32,8 @@ from core.memory import (
     table_cards,
     table_records,
 )
-from core.path import blocked_cells, find_path
-from core.stairs import find_stairs
+from core.path import blocked_cells, cell_of, find_path
+from core.stairs import find_car, find_stairs
 from core.walls import can_see, fake_door_boxes, find_walls, wall_boxes, wall_lines
 from core.weapons import find_goals, find_weapons, load_names
 
@@ -150,6 +150,8 @@ try:
     weapons = []
     # (x, y) of the level's things to take (the briefcase...)
     goals = []
+    # (x, y) of the car when the chapter is done
+    car = None
 
     # when to let go of the right button / when we may right click again
     right_up_at, next_grab = None, 0
@@ -180,6 +182,7 @@ try:
                     blocked = blocked_cells(boxes)
                     next_walls = now + WALLS_EVERY
                 stairs = find_stairs(mem, records)
+                car = find_car(mem, records)
                 weapons = [
                     (x, y)
                     for x, y, frame in find_weapons(mem)
@@ -212,6 +215,7 @@ try:
                 continue
             lockon.reset()  # menu / new floor: forget the old target
             stairs = None  # new floor: the old stairs are not ours any more
+            car = None
             next_scan = 0  # look at the new floor right away
             next_walls = 0  # a new floor: new walls right away
             status(f"{err} (paused)")
@@ -287,9 +291,17 @@ try:
             hidden = where(mem, still_enemies, alive)
             if hidden:
                 goal = min(hidden.values(), key=lambda xy: math.dist(xy, you))
+                status(
+                    f"HUNTING an enemy behind a wall {math.dist(goal, you):3.0f} away"
+                )
+            elif car is not None:
+                goal = car  # the chapter is done: drive away (beats any stairs - some stay lit)
+                close_enough = 0
+                status(f"TO THE CAR {math.dist(goal, you):3.0f} away")
             elif stairs is not None:
                 goal = stairs  # floor clear: go to GO!
-                close_enough = 0  # walk right onto it
+                close_enough = 0
+                status(f"TO THE STAIRS {math.dist(goal, you):3.0f} away")
         keys = set()
         if goal is not None and math.dist(goal, you) > close_enough:
             if math.dist(goal, you) < STRAIGHT and can_see(you, goal, lines):

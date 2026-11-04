@@ -19,8 +19,8 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
-from core.enemies import find_aim, find_me, is_enemy, load_rules
-from core.memory import attach, read_double, table_records
+from core.enemies import find_aim, find_me, is_enemy, load_rules, shelf_cards
+from core.memory import X_OFF, Y_OFF, attach, read_double, table_records
 from core.walls import can_see, find_walls, wall_lines  # noqa: E402
 from core.weapons import find_weapons, load_names
 
@@ -128,6 +128,19 @@ def on_draw(widget, cr):
             cr.set_source_rgb(1, 0.85, 0.1)
         cr.rectangle(sx - 2, sy - 2, 4, 4)
         cr.fill()
+
+    # enemies that live only on the shelf (the ones that come later, unarmed ones) - not in the table
+    for card in shelf_cards(mem, objects):
+        if card in objects or not is_enemy(mem, card, rules):
+            continue
+        try:
+            enemies.append(
+                (read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF))
+            )
+        except OSError:
+            continue
+
+    # enemies: orange squares, just an outline if there's a wall between you and them
 
     # enemies: orange squares, just an outline if there's a wall between you and them
     cr.set_source_rgb(1, 0.45, 0)
