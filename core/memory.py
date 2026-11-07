@@ -83,12 +83,19 @@ def take_snapshot(mem, regions):
     return snapshot
 
 
+def read_bytes(mem, size, address):
+    """size bytes at address. mem = the game's memory (an open file) OR a photo of it (core/shelf.py's Shelf)."""
+    if isinstance(mem, int):
+        return os.pread(mem, size, address)
+    return mem.read(size, address)
+
+
 # read 8 bvtes at adres trun doble and return
 def read_double(mem, address):
-    data = os.pread(mem, 8, address)
+    data = read_bytes(mem, 8, address)
     if len(data) < 8:
         raise OSError(f"can't read {hex(address)}")
-    return np.frombuffer(data, dtype="<f8")[0]
+    return struct.unpack("<d", data)[0]
 
 
 def write_double(mem, address, value):
@@ -124,7 +131,7 @@ def attach():
 
 def read_u32(mem, address):
     """Read a 4-byte whole number (= a pointer in a 32-bit game)."""
-    return int.from_bytes(os.pread(mem, 4, address), "little")
+    return int.from_bytes(read_bytes(mem, 4, address), "little")
 
 
 def wait(text, seconds=4):
@@ -157,7 +164,7 @@ def load_address(name):
 # Same as table_objects, but keyed by the object itself instead of its seat (seats get shuffled).
 def table_records(mem):
     """Every object in the table: {record address: (x, y)}."""
-    data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
+    data = read_bytes(mem, TABLE_END - TABLE_START, TABLE_START)
     records = {}
     for i in range(0, len(data) - 3, 4):
         record = int.from_bytes(data[i : i + 4], "little")
@@ -194,7 +201,7 @@ def table_cards(mem):
     Every record the table points to right now (one quick read: 'is this object still alive?').
     {0} is not a valid record, so it's removed from the set.
     """
-    data = os.pread(mem, TABLE_END - TABLE_START, TABLE_START)
+    data = read_bytes(mem, TABLE_END - TABLE_START, TABLE_START)
     return set(np.frombuffer(data, dtype="<u4").tolist()) - {0}
 
 

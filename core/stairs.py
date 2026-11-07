@@ -31,17 +31,20 @@ def find_stairs(mem, records):
     return None
 
 
-def find_car(mem, records):
+def find_car(mem, records, cards=None):
     """(x, y) of the car when the chapter is done, or None (not done yet / no car on this floor).
     From the whole shelf: at the end of a level the car card is sometimes not in the table.
     """
-    for card in shelf_cards(mem, records):
+    if cards is None:
+        cards = shelf_cards(mem, records)
+    for card in cards:
         try:
             if (
-                read_kind(mem, card, 1, 0x10) == CAR_READY
-                and read_kind(mem, card, 0, 0x14) == FLOOR
+                read_kind(mem, card, 0, 0x14) == FLOOR
+                and read_kind(mem, card, 1, 0x10) == CAR_READY
             ):
                 return read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF)
         except OSError:
-            continue  # junk / the floor is loading
+            # junk / the floor is loading
+            continue
     return None

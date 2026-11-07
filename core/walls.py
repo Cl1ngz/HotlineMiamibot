@@ -19,12 +19,14 @@ FAKE_DOOR = 0x20
 WALL = 0x9
 
 
-def real_walls(mem, records):
+def real_walls(mem, records, cards=None):
     """[(xy, box), ...] of every wall and sofa piece - from the whole SHELF, only the ones with a real box.
     Back on floor 1 at the end of a level the TABLE is full of junk wall cards (199 of 215 had no real box),
     while the real ones (115, the same as at the start) sit on the shelf."""
+    if cards is None:
+        cards = shelf_cards(mem, records)
     found = []
-    for card in shelf_cards(mem, records):
+    for card in cards:
         try:
             if read_kind(mem, card, 0, 0x14) != WALL:
                 continue

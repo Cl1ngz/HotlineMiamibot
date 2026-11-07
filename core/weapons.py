@@ -29,10 +29,12 @@ def load_names():
         return {}
 
 
-def find_weapons(mem):
+def find_weapons(mem, cards=None):
     """[(x, y, frame), ...] for every weapon lying on the floor."""
+    if cards is None:
+        cards = shelf_cards(mem, table_records(mem))
     found = []
-    for card in shelf_cards(mem, table_records(mem)):
+    for card in cards:
         try:
             # the weapon signature: layer FLOOR and picture MARK
             if (
@@ -48,10 +50,12 @@ def find_weapons(mem):
     return found
 
 
-def find_goals(mem):
+def find_goals(mem, cards=None):
     """[(x, y), ...] for every goal (the briefcase...) lying on the floor."""
+    if cards is None:
+        cards = shelf_cards(mem, table_records(mem))
     found = []
-    for card in shelf_cards(mem, table_records(mem)):
+    for card in cards:
         try:
             # the goal signature: layer FLOOR and picture GOAL
             if (
