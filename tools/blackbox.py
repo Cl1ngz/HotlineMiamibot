@@ -13,7 +13,8 @@
 # you were hidden (sitting on an enemy / dead / loading), you died, you came back on a new floor.
 #
 # It keeps the last --keep seconds and saves them to blackbox/<date>_<why>.txt when something happens:
-#   death   you died (saved 1 s later, so the file shows what came right after)
+#   death   you died: your dead card is there, and you're hidden longer than any execution (2 s)
+#           or R was pressed meanwhile (a quick restart) - saved 1 s later
 #   stuck   you hold walking keys but don't move for 1.5 s
 #   key     you press F9 in the game - "save what just happened"
 #   floor   you came back on a new floor
@@ -37,12 +38,13 @@ import time
 from collections import deque
 from datetime import datetime
 
-from core.enemies import find_me_card, is_enemy, load_rules, matches, shelf_cards
+from core.enemies import find_me_card, is_enemy, load_rules, matches
 from core.hands import BUTTON, KEY_A, KEY_D, KEY_R, KEY_S, KEY_SPACE, KEY_W, KEYBOARD, LOOK_X, LOOK_Y, follow
-from core.memory import X_OFF, Y_OFF, attach, read_double, read_kind, read_u32, table_records
+from core.memory import X_OFF, Y_OFF, attach, read_bytes, read_double, read_kind, read_u32, table_cards
 from core.path import blocked_cells
+from core.shelf import Shelf
 from core.stairs import find_car, find_stairs
-from core.walls import can_see, fake_door_boxes, find_walls, wall_boxes, wall_lines
+from core.walls import can_see, fake_door_boxes, real_walls, wall_lines
 from core.weapons import find_goals, find_weapons, load_names
 
 SECTIONS = ("you", "inputs", "enemies", "items", "map", "near")
@@ -77,9 +79,17 @@ LOOK_NEAR = 8  # the look is this close to an enemy -> your character looks at h
 ITEM_NEAR = 60  # weapons appearing / disappearing this close to you are events (far ones are noise)
 STUCK_FOR, STUCK_MOVE = 1.5, 2  # holding walking keys and moving less than STUCK_MOVE in STUCK_FOR s = stuck
 GONE_AFTER = 3.0  # hidden longer than this = not just sitting on an enemy
+# an execution (SPACE) hides you too - for 1.0 s with a weapon, 1.3 s with fists - and your old card even
+# looks dead meanwhile.
+# So only hidden LONGER than this can be a death
+DEATH_AFTER = 2.0
+SPACE_BEFORE = 0.5  # hidden this soon after SPACE = probably an execution
 AFTER = {"death": 1.0, "stuck": 0.5, "key": 0.0, "floor": 0.0}  # wait this long before saving (show the aftermath)
 
-mem, regions, static_regions = attach()
+# the game's memory. Every sample takes a PHOTO of it (core/shelf.py) and reads only through the photo:
+# ~100 kernel reads a scan instead of ~19 000 - so the blackbox doesn't slow hmbot down any more
+game, regions, static_regions = attach()
+mem = game
 rules = load_rules()
 names = load_names()
 started = time.monotonic()
@@ -115,7 +125,11 @@ class Recorder:
 
     def new_name(self, why):
         os.makedirs(args.out, exist_ok=True)
-        return os.path.join(args.out, f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{why}.txt")
+        name = os.path.join(args.out, f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{why}")
+        path, n = name + ".txt", 2
+        while os.path.exists(path):  # two saves in the same second: don't write over the first one
+            path, n = f"{name}_{n}.txt", n + 1
+        return path
 
     @staticmethod
     def lines(t, text):
@@ -173,8 +187,8 @@ def read_look():
 def read_inputs():
     """(names of everything held, is F9 held) - straight from DirectInput's rows in the game."""
     try:
-        row = os.pread(mem, 256, follow(mem, KEYBOARD))
-        buttons = os.pread(mem, 2, follow(mem, BUTTON))
+        row = read_bytes(mem, 256, follow(mem, KEYBOARD))
+        buttons = read_bytes(mem, 2, follow(mem, BUTTON))
         held = {name for key, name in KEYS.items() if row[key] & 0x80}
         if buttons[0] & 0x80:
             held.add("LMB")
@@ -217,8 +231,11 @@ alive = {}  # enemy card -> where he was, last sample
 hand = None
 you = last_you = None
 hidden_since, gone_told, dead_told = None, False, False
+dead_seen = False  # while hidden: your dead-looking card was there (an execution shows it too!)
+r_hidden = False  # while hidden: R was pressed (restart after a death)
 still_xy, still_since, stuck_told = None, 0, False
 f9_before = False
+last_space = -math.inf  # when SPACE was held last
 pending = None  # (when, why) - a save waiting for its aftermath
 next_scan = next_map = next_beat = next_dead = 0
 last_sample = None  # --changes
@@ -227,23 +244,24 @@ try:
     while True:
         now = time.monotonic()
         events = []
+        mem = Shelf(game)  # this sample's photo - every read below (and in the functions above) goes through it
 
         # --- the slow looks ---
         try:
             if now >= next_scan:
-                records = table_records(mem)
-                shelf = shelf_cards(mem, records)
+                records = mem.records
+                shelf = mem.cards
                 candidates = [c for c in shelf if any(matches(mem, c, *r) for r in rules)]
                 if "items" in what:
-                    stairs, car = find_stairs(mem, records), find_car(mem, records)
+                    stairs, car = find_stairs(mem, records), find_car(mem, records, shelf)
                     if stairs != items["stairs"]:
                         events.append(f"GO! on the stairs at {spot(stairs)}" if stairs else "the stairs went off")
                     if car != items["car"]:
                         events.append(f"the car is READY at {spot(car)}" if car else "the car is not ready")
-                    goals = {(round(x), round(y)) for x, y in find_goals(mem)}
+                    goals = {(round(x), round(y)) for x, y in find_goals(mem, shelf)}
                     events += [f"a goal appeared at {spot(g)}" for g in goals - items["goals"]]
                     events += [f"a goal is gone from {spot(g)} (taken?)" for g in items["goals"] - goals]
-                    weapons = {(round(x), round(y), frame) for x, y, frame in find_weapons(mem) if frame}
+                    weapons = {(round(x), round(y), frame) for x, y, frame in find_weapons(mem, shelf) if frame}
                     if you is not None:
                         for x, y, frame in weapons ^ items["weapons"]:
                             if math.dist((x, y), you) < ITEM_NEAR:
@@ -267,13 +285,20 @@ try:
                             continue
                 next_scan = now + SCAN_EVERY
             if now >= next_map:
-                lines = wall_lines(find_walls(mem, records)) if records else []
+                walls = real_walls(mem, records, mem.cards) if records else []  # every wall ONCE: (xy, box) pairs
+                lines = wall_lines([xy for xy, box in walls])
                 if "map" in what and records:
-                    boxes = wall_boxes(mem, records) + fake_door_boxes(mem, records)
+                    boxes = [box for xy, box in walls] + fake_door_boxes(mem, records)
                     if len(boxes) != items["map"]:
                         events.append(f"map: {len(boxes)} boxes, {len(blocked_cells(boxes))} blocked cells")
                         items["map"] = len(boxes)
                 next_map = now + MAP_EVERY
+            # table cards that aren't candidates yet: new ones AND ones that just started matching a rule
+            # (a sitting enemy stands up) - check them NOW, like hmbot does, instead of at the next scan
+            known = set(candidates)
+            for card in table_cards(mem) - known:
+                if any(matches(mem, card, *r) for r in rules):
+                    candidates.append(card)
             me = find_me_card(mem)
         except OSError:
             me = None  # loading / a new floor: memory is moving
@@ -284,6 +309,8 @@ try:
             if "key" in save_on:
                 pending = (now, "f9")
         f9_before = f9
+        if "SPACE" in held:
+            last_space = now
 
         # --- you ---
         sample = None
@@ -292,21 +319,29 @@ try:
                 sample = f"(hidden)  keys {' '.join(sorted(held)) or '-'}"  # e.g. the bot hitting while sitting on him
             if hidden_since is None:
                 hidden_since = now
-                events.append("you're hidden (sitting on an enemy / dead / loading)")
-            if not dead_told and last_you is not None and now >= next_dead:
+                if now - last_space < SPACE_BEFORE:
+                    events.append("you're hidden right after SPACE - an execution?")
+                else:
+                    events.append("you're hidden (dead / loading / sitting on an enemy)")
+            if "R" in held:
+                r_hidden = True
+            if not dead_seen and last_you is not None and now >= next_dead:
                 next_dead = now + SCAN_EVERY
                 # your dead card: layer 0x2C with the death sign, where you were
-                for card in shelf_cards(mem, records) if records else []:
+                for card in mem.cards if records else []:
                     try:
                         if read_kind(mem, card, 0, 0x14) == ME_LAYER and read_u32(mem, card + 0xB4) == 1:
                             if math.dist(xy_of(card), last_you) < 40:
-                                events.append("YOU DIED")
-                                dead_told = True
-                                if "death" in save_on:
-                                    pending = (now + AFTER["death"], "death")
+                                dead_seen = True
                                 break
                     except OSError:
                         continue
+            # an execution shows that card too - so a death only when it lasts too long, or R restarts the level
+            if dead_seen and not dead_told and (now - hidden_since > DEATH_AFTER or r_hidden):
+                events.append("YOU DIED" + (" (R pressed)" if r_hidden else ""))
+                dead_told = True
+                if "death" in save_on:
+                    pending = (now + AFTER["death"], "death")
             if not gone_told and now - hidden_since > GONE_AFTER:
                 events.append(f"you're gone for {GONE_AFTER:g} s (menu / new floor / dead)")
                 gone_told = True
@@ -325,7 +360,14 @@ try:
                             pending = (now, "floor")
                     else:
                         events.append(f"you're back after {gap:.1f} s")
+                    if dead_seen and r_hidden and not dead_told:
+                        # R and the restart were quicker than one sample while hidden
+                        events.append("YOU DIED (R pressed)")
+                        dead_told = True
+                        if "death" in save_on:
+                            pending = (now + AFTER["death"], "death")
                     hidden_since, gone_told, dead_told = None, False, False
+                    dead_seen = r_hidden = False
                 if new_hand != hand and hand is not None:
                     events.append(f"hand {hand:#x} -> {new_hand:#x}")
                 hand, last_you = new_hand, you
