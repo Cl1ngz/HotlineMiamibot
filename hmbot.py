@@ -90,6 +90,9 @@ BACK_STEP = 24
 # you just used the stairs (they went off under your feet): don't walk back onto them for this long
 # (coming down with the briefcase, the stairs stay lit and the 2 new enemies come ~3 s later)
 STAIRS_AGAIN = 5.0
+# someone dropped out of the enemies (died, stood up, got knocked down): his NEW card can be on the shelf
+# only, not in the table - so look at the whole shelf EVERY frame for this long, not only every SCAN_EVERY
+RESCAN_FOR = 0.2
 # "under your feet": the stairs went off while you were this close to them
 ON_STAIRS = 32
 # seconds between two searches for the way
@@ -134,6 +137,8 @@ class Eyes:
     car: tuple | None = None  # (x, y) of the car when the chapter is done
     # when you last used the stairs (-math.inf = never)
     stairs_used_at: float = -math.inf
+    # until when the enemies are looked for on the whole shelf every frame
+    rescan_until: float = 0
     # every frame
     you: tuple = (0, 0)
     hand: int = 0  # your card +0xA0: what you hold (EMPTY_HANDS = nothing)
@@ -296,9 +301,11 @@ def see(eyes, now):
     """
     # a new photo of the game's memory for THIS frame - every read below goes through it
     shelf = Shelf(mem)
+    # the enemies from the whole shelf: every SCAN_EVERY - and EVERY frame for a moment after someone dropped out
+    if now >= eyes.next_scan or now < eyes.rescan_until:
+        eyes.enemies = {r for r in shelf.cards if is_enemy(shelf, r, rules)}
     if now >= eyes.next_scan:
         records = shelf.records
-        eyes.enemies = {r for r in shelf.cards if is_enemy(shelf, r, rules)}
         if now >= eyes.next_walls:
             # every wall and sofa ONCE: a list of (xy, box) pairs
             walls = real_walls(shelf, records, shelf.cards)
@@ -340,6 +347,10 @@ def see(eyes, now):
 
     # only cards that are STILL enemies right now - a shell or a body drops out at once
     eyes.still = [card for card in eyes.enemies if is_enemy(shelf, card, rules)]
+    # someone dropped out (died, stood up, got knocked down): his new card can be on the shelf only -
+    # look at the whole shelf every frame for a moment
+    if len(eyes.still) < len(eyes.enemies):
+        eyes.rescan_until = now + RESCAN_FOR
     # (visible_enemies wants the cards that are alive - that's exactly eyes.still now)
     eyes.spots = lockon.visible_enemies(
         shelf, eyes.still, set(eyes.still), eyes.you, eyes.lines
