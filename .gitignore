@@ -1,3 +1,6 @@
 enemy_guesses.json
 **/__pycache__/
+/blackbox/*
+stuck.txt
+*.npz
 
