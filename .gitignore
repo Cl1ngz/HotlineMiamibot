@@ -1,6 +1,8 @@
 enemy_guesses.json
 **/__pycache__/
-/blackbox/*
+blackbox/
 stuck.txt
 *.npz
+enemy_tool.json
+arrow_find.json
 
