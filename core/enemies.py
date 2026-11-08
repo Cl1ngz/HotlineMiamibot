@@ -8,6 +8,7 @@ from .memory import (
     X_OFF,
     Y_OFF,
     load_address,
+    read_bytes,
     read_double,
     read_kind,
     save_address,
@@ -18,6 +19,7 @@ from .memory import (
 # 4bytes (X at +0x50, Y at +0x58)
 RECORD = 0xB8
 INSTANCE = 0x6D0  # bytes in the bigger object behind the record's first pointer
+AIM_PICTURE = 0xA5  # the crosshair's picture (folder +0x10) - always the same; its layer is NOT (0xAF, outside by the dumpster 0x1)
 
 
 def find_me_card(mem):
@@ -85,10 +87,8 @@ def find_aim_card(mem):
     aims = {}
     for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
         try:
-            if (
-                read_kind(mem, card, 0, 0x14) == 0xAF
-                and read_kind(mem, card, 1, 0x10) == 0xA5
-            ):
+            # the crosshair: known by its picture - its layer changes from floor to floor
+            if read_kind(mem, card, 1, 0x10) == AIM_PICTURE:
                 aims[card] = (
                     read_double(mem, card + X_OFF),
                     read_double(mem, card + Y_OFF),
@@ -167,13 +167,27 @@ def matches(mem, record, where, offset, value):
 
 
 def is_enemy(mem, record, rules):
+    """Does this card match an enemy rule - and not that rule's death sign?
+    The whole card is read in ONE go (0xB8 bytes) and the numbers are taken from those bytes:
+    ~3x faster than one read_kind per rule (5 rules + the death signs)."""
+    try:
+        card = read_bytes(mem, RECORD, record)
+    except OSError:
+        return False
+    if len(card) < RECORD:
+        return False
+
+    # a function inside a function: it sees `card`, `mem` and `record` from is_enemy
+    def has(where, offset, value):
+        if where == 0:
+            # the 4-byte number at `offset` inside the card's bytes
+            return int.from_bytes(card[offset : offset + 4], "little") == value
+        # a pocket in the folder: read it like before
+        return matches(mem, record, where, offset, value)
+
     for rule in rules:
-        if matches(mem, record, *rule):
-            return not any(
-                matches(mem, record, *check)
-                for kind, check in dead_checks
-                if kind == rule
-            )
+        if has(*rule):
+            return not any(has(*check) for kind, check in dead_checks if kind == rule)
     return False
 
 

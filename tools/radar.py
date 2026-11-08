@@ -31,7 +31,14 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
 from core.enemies import find_aim, find_me_card, is_enemy, load_rules  # noqa: E402
-from core.memory import X_OFF, Y_OFF, attach, read_double, read_kind, table_cards  # noqa: E402
+from core.memory import (
+    X_OFF,
+    Y_OFF,
+    attach,
+    read_double,  # noqa: E402
+    read_kind,
+    table_cards,
+)
 from core.shelf import Shelf  # noqa: E402
 from core.stairs import find_car, find_stairs  # noqa: E402
 from core.walls import can_see, real_walls, wall_lines  # noqa: E402
@@ -47,8 +54,10 @@ NOW_FILE = "/tmp/hmbot_now.json"
 BOT_OLD = 1.0
 SCAN_EVERY = 0.25  # the whole shelf (enemies, weapons, stairs, the car) this often - like the bot
 WALLS_EVERY = 2.0  # walls never move - read them this often
-NEW_FLOOR_JUMP = 100  # you moved this far between two frames: a new floor - start the map over
-KNOCKED = 0x16  # card +0x10 of an enemy knocked out on the floor
+NEW_FLOOR_JUMP = (
+    100  # you moved this far between two frames: a new floor - start the map over
+)
+KNOCKED = (0x16, 0x12B)
 # weapon kind -> colour (r, g, b from 0 to 1); weapons nobody named yet get GREY
 KIND_COLOURS = {
     "melee": (0.3, 0.75, 1.0),  # light blue - walk up and hit
@@ -79,7 +88,15 @@ floor = {
 
 
 def new_floor():
-    floor.update(bounds=None, start=set(), walls=[], lines=[], walls_at=0, scan_at=0, enemy_cards=set())
+    floor.update(
+        bounds=None,
+        start=set(),
+        walls=[],
+        lines=[],
+        walls_at=0,
+        scan_at=0,
+        enemy_cards=set(),
+    )
 
 
 def read_bot():
@@ -96,7 +113,8 @@ def read_bot():
 
 def look():
     """Everything the radar draws, from one photo of the game's memory. Raises OSError (no player...).
-    The slow part (the whole shelf) only every SCAN_EVERY, like the bot - the radar mustn't slow the bot down."""
+    The slow part (the whole shelf) only every SCAN_EVERY, like the bot - the radar mustn't slow the bot down.
+    """
     shelf = Shelf(mem)
     records = shelf.records
     if not records:
@@ -115,7 +133,9 @@ def look():
         floor["lines"] = wall_lines([xy for xy, box in floor["walls"]])
         floor["walls_at"] = now
     if now - floor["scan_at"] > SCAN_EVERY:
-        floor["enemy_cards"] = {card for card in shelf.cards if is_enemy(shelf, card, rules)}
+        floor["enemy_cards"] = {
+            card for card in shelf.cards if is_enemy(shelf, card, rules)
+        }
         floor["weapons"] = find_weapons(shelf, shelf.cards)
         floor["goals"] = find_goals(shelf, shelf.cards)
         floor["stairs"] = find_stairs(shelf, records)
@@ -127,12 +147,14 @@ def look():
             floor["enemy_cards"].add(card)
     enemies = []
     for card in list(floor["enemy_cards"]):
-        if not is_enemy(shelf, card, rules):  # died / got up: gone from the list until the next scan finds him
+        if not is_enemy(
+            shelf, card, rules
+        ):  # died / got up: gone from the list until the next scan finds him
             floor["enemy_cards"].discard(card)
             continue
         try:
             xy = (read_double(shelf, card + X_OFF), read_double(shelf, card + Y_OFF))
-            enemies.append((xy, read_kind(shelf, card, 0, 0x10) == KNOCKED))
+            enemies.append((xy, read_kind(shelf, card, 0, 0x10) in KNOCKED))
         except OSError:
             continue
 
@@ -141,7 +163,11 @@ def look():
     except OSError:
         aim = None
     # the table's things near you (far away = junk values)
-    things = [xy for xy in records.values() if abs(xy[0] - you[0]) < 1500 and abs(xy[1] - you[1]) < 1500]
+    things = [
+        xy
+        for xy in records.values()
+        if abs(xy[0] - you[0]) < 1500 and abs(xy[1] - you[1]) < 1500
+    ]
     return {
         "you": you,
         "aim": aim,
@@ -258,7 +284,14 @@ def on_draw(widget, cr):
     if seen["stairs"] is not None:
         sx, sy = to_radar(seen["stairs"])
         back = came_by is not None and math.dist(came_by, seen["stairs"]) < 1
-        text(cr, sx - 4, sy + 5, "B" if back else "G", (0.6, 0.6, 0.6) if back else (0.2, 1, 0.3), 15)
+        text(
+            cr,
+            sx - 4,
+            sy + 5,
+            "B" if back else "G",
+            (0.6, 0.6, 0.6) if back else (0.2, 1, 0.3),
+            15,
+        )
     # the car, ready: C
     if seen["car"] is not None:
         sx, sy = to_radar(seen["car"])
@@ -354,7 +387,9 @@ def tick():
 
 def reload_rules():
     global rules
-    rules = load_rules()  # a new rule from tools/enemy_tool.py shows up without restarting the radar
+    rules = (
+        load_rules()
+    )  # a new rule from tools/enemy_tool.py shows up without restarting the radar
     return True
 
 
@@ -371,11 +406,17 @@ if __name__ == "__main__":
 
         GtkLayerShell.init_for_window(win)
         GtkLayerShell.set_layer(win, GtkLayerShell.Layer.OVERLAY)
-        GtkLayerShell.set_anchor(win, GtkLayerShell.Edge.BOTTOM, True)  # change BOTTOM / RIGHT
-        GtkLayerShell.set_anchor(win, GtkLayerShell.Edge.RIGHT, True)  # to TOP / LEFT to move it
+        GtkLayerShell.set_anchor(
+            win, GtkLayerShell.Edge.BOTTOM, True
+        )  # change BOTTOM / RIGHT
+        GtkLayerShell.set_anchor(
+            win, GtkLayerShell.Edge.RIGHT, True
+        )  # to TOP / LEFT to move it
         GtkLayerShell.set_margin(win, GtkLayerShell.Edge.BOTTOM, 20)
         GtkLayerShell.set_margin(win, GtkLayerShell.Edge.RIGHT, 20)
-        GtkLayerShell.set_keyboard_mode(win, GtkLayerShell.KeyboardMode.NONE)  # never steal the keyboard
+        GtkLayerShell.set_keyboard_mode(
+            win, GtkLayerShell.KeyboardMode.NONE
+        )  # never steal the keyboard
 
     win.set_size_request(SIZE, SIZE + TOP + TEXT)
     win.set_app_paintable(True)
@@ -391,5 +432,7 @@ if __name__ == "__main__":
     GLib.timeout_add(1000, reload_rules)  # re-read the enemy rules once per second
     win.show_all()
     if "--window" not in sys.argv:
-        win.input_shape_combine_region(cairo.Region())  # empty click area = clicks go to the game
+        win.input_shape_combine_region(
+            cairo.Region()
+        )  # empty click area = clicks go to the game
     Gtk.main()

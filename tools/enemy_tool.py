@@ -20,6 +20,7 @@ from collections import Counter
 
 import core.enemies
 from core.enemies import (
+    AIM_PICTURE,
     RECORD,
     copy_memory,
     find_aim,
@@ -29,10 +30,23 @@ from core.enemies import (
     save_dead_checks,
     save_rules,
 )
-from core.memory import X_OFF, Y_OFF, attach, read_double, read_kind, table_records, wait
+from core.hands import LOOK_X, LOOK_Y, follow
+from core.memory import (
+    X_OFF,
+    Y_OFF,
+    attach,
+    read_double,
+    read_kind,
+    table_records,
+    wait,
+)
 
 LAST_FILE = "enemy_tool.json"  # the last look's guesses (so "save N" needs no aiming)
-DEATH = (0, 0xB4, 1)  # the death sign every new rule gets: card +0xB4 = 1 (a body or a shell)
+DEATH = (
+    0,
+    0xB4,
+    1,
+)  # the death sign every new rule gets: card +0xB4 = 1 (a body or a shell)
 SKIP = (0x2C, 0xAF)  # layers of you and the crosshair
 CLOSE = 20  # the thing must be this close to the crosshair
 PARTNER = 4  # cards this close to him are his own pieces (shadow, legs, gun) - not "other things"
@@ -67,7 +81,9 @@ def load_last(mode):
     except OSError:
         raise SystemExit(f"no last look - run python -m tools.enemy_tool {mode} first")
     if last["mode"] != mode:
-        raise SystemExit(f"the last look was '{last['mode']}', not '{mode}' - run '{mode}' again")
+        raise SystemExit(
+            f"the last look was '{last['mode']}', not '{mode}' - run '{mode}' again"
+        )
     return last
 
 
@@ -106,7 +122,9 @@ if args[0] == "save" and len(args) == 2:
     checks = core.enemies.dead_checks
     checks.append((rule, DEATH))
     save_dead_checks(checks)
-    print(f"saved rule {len(rules) - 1}: {show_rule(rule)}, dead when {show_rule(DEATH)}")
+    print(
+        f"saved rule {len(rules) - 1}: {show_rule(rule)}, dead when {show_rule(DEATH)}"
+    )
     print("check it: python -m tools.radar - only enemies orange, no furniture")
     raise SystemExit
 
@@ -121,31 +139,48 @@ if args[:2] == ["dead", "save"] and len(args) == 3:
     checks.append((kind, check))
     save_dead_checks(checks)
     print(f"saved: {show_rule(kind)} is dead when {show_rule(check)}")
-    print("check it: the body should stop being orange on the radar, the living enemies should stay orange")
+    print(
+        "check it: the body should stop being orange on the radar, the living enemies should stay orange"
+    )
     raise SystemExit
 
 if args[0] == "remove" and len(args) == 2:
     number = pick(rules, args[1])
     rule = rules.pop(number)
     save_rules(rules)
-    save_dead_checks([(kind, check) for kind, check in core.enemies.dead_checks if kind != rule])
-    print(f"removed rule {number}: {show_rule(rule)} (and its death signs). {len(rules)} rules left.")
+    save_dead_checks(
+        [(kind, check) for kind, check in core.enemies.dead_checks if kind != rule]
+    )
+    print(
+        f"removed rule {number}: {show_rule(rule)} (and its death signs). {len(rules)} rules left."
+    )
     raise SystemExit
 
 if args not in (["look"], ["dead"]):
-    raise SystemExit("usage: python -m tools.enemy_tool [look | save N | remove N | dead | dead save N]")
+    raise SystemExit(
+        "usage: python -m tools.enemy_tool [look | save N | remove N | dead | dead save N]"
+    )
 
 # --- look / dead: aim at something in the game ---
 mem, regions, static_regions = attach()
 find_aim(mem)  # warm-up: find_aim has to see the crosshair move once
-what = "the NEW enemy (alive)" if args[0] == "look" else "the BODY that still counts as an enemy"
+what = (
+    "the NEW enemy (alive)"
+    if args[0] == "look"
+    else "the BODY that still counts as an enemy"
+)
 wait(f"aim at {what} and keep the crosshair on it", 3)
 aim = find_aim(mem)
+if aim is None:
+    # no crosshair card on this floor (outside, by the dumpster): the game's own "where the mouse is" is the same point
+    aim = (read_double(mem, follow(mem, LOOK_X)), read_double(mem, follow(mem, LOOK_Y)))
 me = find_me_card(mem)
 table = table_records(mem)
 if aim is None or not table:
     raise SystemExit("no crosshair / no table - are you in a level?")
-wall_layer = Counter(read_kind(mem, card, 0, 0x14) for card in table).most_common(1)[0][0]
+wall_layer = Counter(read_kind(mem, card, 0, 0x14) for card in table).most_common(1)[0][
+    0
+]
 
 # every card on the shelf at a real position (the table misses some live ones - you, enemies that come later)
 cards = {}
@@ -162,7 +197,9 @@ def describe(card):
     """One line: where it is, its 3 numbers, the death sign, which rule makes it an enemy."""
     x, y = cards[card]
     try:
-        layer, state, picture = (read_kind(mem, card, where, offset) for where, offset, _ in FIELDS)
+        layer, state, picture = (
+            read_kind(mem, card, where, offset) for where, offset, _ in FIELDS
+        )
         done = read_kind(mem, card, 0, 0xB4)
     except OSError:
         return f"  {card:#x} at ({x:4.0f},{y:4.0f})  can't read"
@@ -179,13 +216,23 @@ near = []
 for card, xy in cards.items():
     try:
         layer = read_kind(mem, card, 0, 0x14)
+        picture = read_kind(mem, card, 1, 0x10)
     except OSError:
         continue
-    if card != me and layer not in SKIP and layer != wall_layer and math.dist(xy, aim) < CLOSE:
+    if picture == AIM_PICTURE:
+        continue  # the crosshair itself, whatever its layer
+    if (
+        card != me
+        and layer not in SKIP
+        and layer != wall_layer
+        and math.dist(xy, aim) < CLOSE
+    ):
         near.append((math.dist(xy, aim), card in table, card))
 if not near:
     raise SystemExit("nothing (but walls) under the crosshair - aim right at it")
-print(f"crosshair at {aim[0]:.0f},{aim[1]:.0f} - everything close to it (closest first):")
+print(
+    f"crosshair at {aim[0]:.0f},{aim[1]:.0f} - everything close to it (closest first):"
+)
 for _, _, card in sorted(near):
     print(describe(card))
 
@@ -217,25 +264,45 @@ if args[0] == "look":
             if card == him or math.dist(xy, cards[him]) < PARTNER:
                 continue
             others += core.enemies.matches(mem, card, where, offset, value)
-        stays = "yes" if len(seen[i]) == 1 else f"NO ({', '.join(hex(v) for v in sorted(seen[i]))})"
+        stays = (
+            "yes"
+            if len(seen[i]) == 1
+            else f"NO ({', '.join(hex(v) for v in sorted(seen[i]))})"
+        )
         good = "   <- good" if len(seen[i]) == 1 and others == 0 else ""
-        print(f"  {len(guesses)}  {label:8} = {value:#10x}   {stays:16}  {others}{good}")
+        print(
+            f"  {len(guesses)}  {label:8} = {value:#10x}   {stays:16}  {others}{good}"
+        )
         guesses.append([where, offset, value])
     save_last("look", guesses)
-    print("\n(more enemies of the same new kind on the floor count as 'others' too - that's fine)")
+    print(
+        "\n(more enemies of the same new kind on the floor count as 'others' too - that's fine)"
+    )
     print("save the good one: python -m tools.enemy_tool save N")
     raise SystemExit
 
 # --- dead: a body that is still orange ---
 bodies = [card for _, _, card in sorted(near) if is_enemy(mem, card, rules)]
 if not bodies:
-    raise SystemExit("\nnothing under the crosshair counts as an enemy - this body is fine already")
+    raise SystemExit(
+        "\nnothing under the crosshair counts as an enemy - this body is fine already"
+    )
 body = bodies[0]
-kind = next(rule for rule in rules if core.enemies.matches(mem, body, *rule))  # the rule that made it orange
-living = [c for c in cards if c != body and core.enemies.matches(mem, c, *kind) and is_enemy(mem, c, rules)]
+kind = next(
+    rule for rule in rules if core.enemies.matches(mem, body, *rule)
+)  # the rule that made it orange
+living = [
+    c
+    for c in cards
+    if c != body and core.enemies.matches(mem, c, *kind) and is_enemy(mem, c, rules)
+]
 if len(living) < 2:
-    raise SystemExit("\nneed at least 2 LIVING enemies of that kind on the floor to compare the body with")
-print(f"\ncomparing the body {body:#x} with {len(living)} living enemies of rule {rules.index(kind)} for 2 s...")
+    raise SystemExit(
+        "\nneed at least 2 LIVING enemies of that kind on the floor to compare the body with"
+    )
+print(
+    f"\ncomparing the body {body:#x} with {len(living)} living enemies of rule {rules.index(kind)} for 2 s..."
+)
 agree = None  # {(where, offset, value every living enemy has): the body's value}
 for _ in range(WATCH):  # a number that changes while they walk around is no good
     copies = copy_memory(mem, [body] + living)
@@ -244,18 +311,36 @@ for _ in range(WATCH):  # a number that changes while they walk around is no goo
     found = {}
     for where in (0, 1):
         for offset in range(0, len(copies[body][where]), 4):
-            theirs = {int.from_bytes(d[where][offset : offset + 4], "little") for c, d in copies.items() if c != body}
+            theirs = {
+                int.from_bytes(d[where][offset : offset + 4], "little")
+                for c, d in copies.items()
+                if c != body
+            }
             mine = int.from_bytes(copies[body][where][offset : offset + 4], "little")
-            if len(theirs) == 1 and mine not in theirs:  # all the living agree, the body doesn't
+            if (
+                len(theirs) == 1 and mine not in theirs
+            ):  # all the living agree, the body doesn't
                 found[(where, offset, theirs.pop())] = mine
-    agree = found if agree is None else {k: v for k, v in found.items() if k in agree and agree[k] == v}
+    agree = (
+        found
+        if agree is None
+        else {k: v for k, v in found.items() if k in agree and agree[k] == v}
+    )
     time.sleep(0.25)
-guesses = [[where, offset, value, mine] for (where, offset, value), mine in agree.items()]
-guesses.sort(key=lambda g: (not (0 <= g[2] < 10000 and 0 <= g[3] < 10000), g[0], g[1]))  # small numbers first
+guesses = [
+    [where, offset, value, mine] for (where, offset, value), mine in agree.items()
+]
+guesses.sort(
+    key=lambda g: (not (0 <= g[2] < 10000 and 0 <= g[3] < 10000), g[0], g[1])
+)  # small numbers first
 if not guesses:
-    raise SystemExit("nothing sets the body apart from the living - are you sure it's dead?")
+    raise SystemExit(
+        "nothing sets the body apart from the living - are you sure it's dead?"
+    )
 print("  #  spot             living have    body has")
 for i, (where, offset, value, mine) in enumerate(guesses[:15]):
     print(f"  {i:2} {name(where, offset):14} {value:#12x} {mine:#11x}")
 save_last("dead", guesses[:15], list(kind))
-print("\nsave the best one (small numbers are usually it): python -m tools.enemy_tool dead save N")
+print(
+    "\nsave the best one (small numbers are usually it): python -m tools.enemy_tool dead save N"
+)

@@ -1,5 +1,5 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
-# core/path.py - find a way around the walls: the "wave" (BFS) on a grid of cells (a library)
+# core/path.py - find a way around the walls: A* on a grid of cells (a library)
 #
 # The floor is cut into square cells, CELL x CELL. From your cell the "water" spreads to the cells next to it,
 # then to theirs... but never into a BLOCKED cell. Every cell remembers where its water came from,
@@ -10,13 +10,14 @@
 # One set lookup per cell - the chunks idea (only look at what's near) taken all the way.
 #
 #   blocked_cells(boxes)              ->  {(cell x, cell y), ...}   (boxes from walls.wall_boxes)
-#   find_path(start, goal, blocked)   ->  [(x, y), ...] points to walk through, start to goal  (None = no way)
+#   find_path(start, goal, blocked)   ->  [(x, y), ...] points to walk through, start to goal
+#                                         (no way to the goal -> the way to the cell closest to it)
+import heapq
 import math
-from collections import deque
 
 # size of one cell in game units (a wall piece is 32)
 CELL = 16
-# stop flooding after this many cells - the goal is unreachable or very far
+# stop after trying this many cells - the goal is unreachable (or the floor is huge)
 MAX_CELLS = 5000
 # right, left, down, up
 STEPS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
@@ -52,8 +53,18 @@ def blocked_cells(boxes):
     return blocked
 
 
+def guess(cell, goal_cell):
+    """How many steps from cell to the goal if there were no walls at all (never more than the real way)."""
+    return abs(cell[0] - goal_cell[0]) + abs(cell[1] - goal_cell[1])
+
+
 def find_path(start, goal, blocked):
-    """Shortest way from start to goal around the blocked cells, as a list of points. None if there's none."""
+    """Shortest way from start to goal around the blocked cells, as a list of points.
+    A* ("A star"): like the water, but the cells that look closest to the goal are tried first - so on a big
+    open floor (the metro, outside) it goes almost straight there instead of flooding everything around.
+    Never None: when the goal can't be reached (inside a box, walled in, too far) it's the way to the
+    cell closest to the goal - walk there and you're as close as it gets.
+    """
     start_cell, goal_cell = cell_of(start), cell_of(goal)
     if start_cell in blocked:
         # you stand right by a wall / a door: your cell's MIDDLE is in a blocked zone, and from there the water
@@ -66,28 +77,39 @@ def find_path(start, goal, blocked):
         free = [cell for cell in around if cell not in blocked]
         if free:
             start_cell = min(free, key=lambda c: math.dist(middle(c), start))
-    # cell -> the cell its water came from (the arrow)
-    came_from = {start_cell: None}
-    # flooded cells whose neighbours we haven't tried yet, oldest first
-    wave = deque([start_cell])
-    while wave and len(came_from) < MAX_CELLS:
-        here = wave.popleft()
+    came_from = {start_cell: None}  # cell -> the cell we came from (the arrow back)
+    steps_to = {
+        start_cell: 0
+    }  # cell -> steps from the start, the shortest way found so far
+    # cells to try: (steps so far + the guess to the goal, steps so far, cell) - heapq gives the smallest first
+    todo = [(guess(start_cell, goal_cell), 0, start_cell)]
+    # the cell closest to the goal reached so far: if the goal can't be reached, the way goes there instead
+    best = start_cell
+    tried = 0
+    while todo and tried < MAX_CELLS:
+        _, steps, here = heapq.heappop(todo)
         if here == goal_cell:
             break
+        if steps > steps_to[here]:
+            continue  # an old, longer way to this cell - a shorter one was tried already
+        tried += 1
+        if guess(here, goal_cell) < guess(best, goal_cell):
+            best = here  # the closest to the goal so far
         for dx, dy in STEPS:
             nxt = (here[0] + dx, here[1] + dy)
-            if nxt in came_from:
-                continue
             if nxt in blocked and nxt != goal_cell:
                 continue
+            if nxt in steps_to and steps_to[nxt] <= steps + 1:
+                continue  # we know a way there that's as short already
+            steps_to[nxt] = steps + 1
             came_from[nxt] = here
-            wave.append(nxt)
+            heapq.heappush(todo, (steps + 1 + guess(nxt, goal_cell), steps + 1, nxt))
 
-    if goal_cell not in came_from:
-        return None
-    # follow the arrows back: goal -> ... -> start, then turn the list around
+    # the goal reached -> the way to it; not reached (inside a box, walled in, too far) -> to the closest cell
+    end = goal_cell if goal_cell in came_from else best
+    # follow the arrows back: end -> ... -> start, then turn the list around
     path = []
-    cell = goal_cell
+    cell = end
     while cell is not None:
         path.append(middle(cell))
         cell = came_from[cell]
