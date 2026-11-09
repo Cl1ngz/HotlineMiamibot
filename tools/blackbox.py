@@ -38,8 +38,9 @@ import time
 from collections import deque
 from datetime import datetime
 
-from core.enemies import find_me_card, is_enemy, load_rules, matches
-from core.hands import BUTTON, KEY_A, KEY_D, KEY_R, KEY_S, KEY_SPACE, KEY_W, KEYBOARD, LOOK_X, LOOK_Y, follow
+import core.hands as hands
+from core.enemies import find_aim, find_me_card, is_enemy, load_rules, matches
+from core.hands import KEY_A, KEY_D, KEY_R, KEY_S, KEY_SPACE, KEY_W, KEYBOARD, follow
 from core.memory import X_OFF, Y_OFF, attach, read_bytes, read_double, read_kind, read_u32, table_cards
 from core.path import blocked_cells
 from core.shelf import Shelf
@@ -90,6 +91,10 @@ AFTER = {"death": 1.0, "stuck": 0.5, "key": 0.0, "floor": 0.0}  # wait this long
 # ~100 kernel reads a scan instead of ~19 000 - so the blackbox doesn't slow hmbot down any more
 game, regions, static_regions = attach()
 mem = game
+# the look and the mouse button don't sit at the same place in every launch: pick their chains like hmbot
+# does (core/hands.py) - and read them as hands.LOOK_X / hands.BUTTON, so the picked ones are used
+hands.find_look(mem, find_aim(mem))
+hands.find_button(mem)
 rules = load_rules()
 names = load_names()
 started = time.monotonic()
@@ -179,7 +184,7 @@ def spot(xy):
 
 def read_look():
     try:
-        return read_double(mem, follow(mem, LOOK_X)), read_double(mem, follow(mem, LOOK_Y))
+        return read_double(mem, follow(mem, hands.LOOK_X)), read_double(mem, follow(mem, hands.LOOK_Y))
     except OSError:
         return None
 
@@ -188,7 +193,7 @@ def read_inputs():
     """(names of everything held, is F9 held) - straight from DirectInput's rows in the game."""
     try:
         row = read_bytes(mem, 256, follow(mem, KEYBOARD))
-        buttons = read_bytes(mem, 2, follow(mem, BUTTON))
+        buttons = read_bytes(mem, 2, follow(mem, hands.BUTTON))
         held = {name for key, name in KEYS.items() if row[key] & 0x80}
         if buttons[0] & 0x80:
             held.add("LMB")

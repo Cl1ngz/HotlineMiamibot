@@ -28,6 +28,8 @@ from core.arrow import ArrowWatch
 from core.enemies import find_aim, find_me_card, is_enemy, load_rules
 from core.hands import (
     KEY_SPACE,
+    find_button,
+    find_look,
     key_down,
     key_up,
     look_at,
@@ -146,6 +148,8 @@ FORGET_AFTER = 8
 # what the bot is doing, for tools/radar.py (the same name is in tools/radar.py) - rewritten this often
 NOW_FILE = "/tmp/hmbot_now.json"
 SHARE_EVERY = 0.1
+# at the start wait this long for the crosshair (find_look picks the look chain by it)
+LOOK_WAIT = 3
 
 # mem, mem_rw, rules and names are set ONCE at the start (bottom of the file) and never change,
 # so every function below just uses them - like FPS
@@ -325,6 +329,38 @@ def wait_for_game(mem):
         print("waiting for your character...", end="\r", flush=True)
         time.sleep(0.2)
     print()
+
+
+def pick_look():
+    """Find the look chain for this launch (core/hands.py find_look) - by the crosshair, so wait for it a moment."""
+    find_aim(mem)  # warm-up: find_aim has to see the crosshair once
+    give_up = time.monotonic() + LOOK_WAIT
+    while time.monotonic() < give_up:
+        aim = find_aim(mem)
+        if aim is not None:
+            chain = find_look(mem, aim)
+            if chain is None:
+                raise SystemExit(
+                    "no look chain fits this launch - run python -m helpers_for_me.look_find"
+                )
+            print("look: [GAME]" + "".join(f" -> +{offset:#x}" for offset in chain))
+            return
+        print("waiting for the crosshair...", end="\r", flush=True)
+        time.sleep(0.2)
+    # no crosshair in this scene: the first chain that can be read at all (a guess - checked again if a write fails)
+    chain = find_look(mem, None)
+    print(f"look: a guess, no crosshair - {chain}")
+
+
+def pick_button():
+    """Find the mouse button chain for this launch (core/hands.py find_button)."""
+    chain, sure = find_button(mem)
+    if chain is None:
+        raise SystemExit(
+            "no button chain can be read in this launch - run python -m helpers_for_me.button_find"
+        )
+    note = "" if sure else "  (a guess - no mouse GUID found inside)"
+    print("button: [GAME]" + "".join(f" -> +{offset:#x}" for offset in chain) + note)
 
 
 def click(hands, now):
@@ -724,9 +760,13 @@ def pause(err, eyes, hands, legs, now):
 def wait_frame(eyes, now):
     """Wait for the next frame - and keep the crosshair on the target meanwhile."""
     frame_end = now + 1 / FPS
+    aim = eyes.target is not None
     while time.monotonic() < frame_end:
-        if eyes.target is not None:
-            look_at(mem, mem_rw, eyes.spots[eyes.target])
+        if aim:
+            try:
+                look_at(mem, mem_rw, eyes.spots[eyes.target])
+            except OSError:
+                aim = False  # can't write right now - stop for this frame, the next one tries again
         time.sleep(0.002)  # don't burn CPU while waiting for the next frame
 
 
@@ -753,6 +793,8 @@ slowest = 0
 next_share = 0  # when to tell the radar again
 try:
     wait_for_game(mem)
+    pick_look()
+    pick_button()
     watch.search_all()
     print(f"the arrow lists: {len(watch.blocks)} memory block(s)")
     while time.monotonic() < stop_at:
@@ -768,8 +810,15 @@ try:
             # only the loop can skip the rest of the frame - see() can't
             continue
         plan = decide(eyes, hands, now)
-        act(plan, eyes, hands, now)
-        walk(plan, eyes, legs, now)
+        try:
+            act(plan, eyes, hands, now)
+            walk(plan, eyes, legs, now)
+        except OSError as err:
+            # a write didn't reach the game: the look chain may lead somewhere else now - pick it again
+            if find_look(mem, find_aim(mem)) is None:
+                status(f"can't write to the game: {err}")
+            time.sleep(1 / FPS)
+            continue
         status(plan.text)
         if now >= next_share:
             share(plan, eyes, legs)
