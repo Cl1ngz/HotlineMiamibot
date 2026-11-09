@@ -26,32 +26,18 @@ from dataclasses import dataclass, field
 from core import lockon
 from core.arrow import ArrowWatch
 from core.enemies import find_aim, find_me_card, is_enemy, load_rules
-from core.hands import (
-    KEY_SPACE,
-    find_button,
-    find_look,
-    key_down,
-    key_up,
-    look_at,
-    press_left,
-    press_right,
-    release_left,
-    release_right,
-)
+from core.hands import (KEY_SPACE, find_button, find_look, key_down, key_up,
+                        look_at, press_left, press_right, release_left,
+                        release_right)
 from core.legs import hold, keys_toward, next_point
-from core.memory import (
-    X_OFF,
-    Y_OFF,
-    attach,
-    open_rw,
-    read_double,
-    read_kind,
-    table_cards,
-)
+from core.memory import (X_OFF, Y_OFF, attach, open_rw, read_double, read_kind,
+                         table_cards)
 from core.path import blocked_cells, cell_of, find_path
+from core.scenes import load_doors, load_scenes, save_doors, scene_id
 from core.shelf import Shelf
 from core.stairs import find_car, find_stairs
-from core.walls import can_see, fake_door_boxes, real_walls, wall_lines
+from core.walls import (WALL, can_see, door_boxes, fake_door_boxes, real_walls,
+                        wall_lines)
 from core.weapons import find_goals, find_weapons, load_names
 
 FPS = 60  # the game runs at 60 frames per second, no point going faster
@@ -77,6 +63,10 @@ READY = {
 READY_UNKNOWN = 0.45
 # hold the left button at most this long - if no swing came by then, let go (enemy gone, something else)
 SWING_WAIT = 0.6
+# no swing came in SWING_WAIT (a dialogue froze the game, the enemy stepped away): keep the button UP this long
+# before pressing again - the game must SEE it go up, or it never notices a new press
+# (in the tutorial the text then moved on only once every ~4 s)
+RELEASE_GAP = 0.15
 # card +0x10 of an enemy knocked out on the floor: a swing does nothing to him, SPACE finishes him
 # (0x16 the usual ones, 0x12b the one outside by the dumpster - the game puts a red arrow over him)
 KNOCKED = (0x16, 0x12B)
@@ -93,6 +83,16 @@ EXEC_SAFE = 200
 ENEMY_SPEED = 180
 # back off this far at a time - less than STRAIGHT, so the legs walk straight there
 BACK_STEP = 24
+# an enemy running at you faster than this (his own steps, px/s) is CHARGING: don't run into him - meet him
+# standing (he runs ~180; running into him doubles the speed you meet at, and in the logs he always hit first)
+CHARGE_SPEED = 60
+# ...when he's this close (further away: walk on, he may still turn)
+MEET_FAR = 150
+# from the press to the hit takes about this long: against a charger press when he's this many seconds of his
+# run further than REACH (the 3 deaths on the metro's floor 2: LMB at 24-31, dead one frame later)
+SWING_LEAD = 0.15
+# measure his run over this long (every frame is too jumpy: the bot can read the same game frame twice)
+CLOSING_EVERY = 0.1
 # the stairs that light up this soon after you came to a floor, this close to you, are the ones you came by:
 # they lead BACK, so they're never a goal (until they go off and light up again - then the floor is done)
 ARRIVAL_TIME = 1.5
@@ -101,9 +101,6 @@ ARRIVAL_NEAR = 64
 JUMP = 100
 # the legs keep away from lit stairs that aren't the goal (stepping on them = another floor)
 STAIRS_SIZE = 16
-# the stairs went off while you were this close to them: you used them -> you're on a new floor
-# (the scan is every 0.25 s and the game walks you out of the stairs fast - so not too small)
-ON_STAIRS = 64
 # someone dropped out of the enemies (died, stood up, got knocked down): his NEW card can be on the shelf
 # only, not in the table - so look at the whole shelf EVERY frame for this long, not only every SCAN_EVERY
 RESCAN_FOR = 0.2
@@ -128,6 +125,8 @@ EXEC_EVERY = 0.1
 STRAIGHT = 32
 # the red arrow: walk this close to what it points at...
 ARROW_WALK = 8
+# a spot shown with tools/scene_tool.py: walk this close to it (then stand there and tap LMB - the talk goes on)
+SPOT_WALK = 8
 # ...and from this close tap LMB on it (the TV stops you ~20 away from its middle)
 USE_REACH = 24
 # seconds between two LMB taps while using something (also clicks the text away)
@@ -145,6 +144,13 @@ MOVED_A_BIT = 2
 BUMP_AFTER = 0.4
 # ...and forget it after this long (a dialogue also stops you - it shouldn't block a cell for ever)
 FORGET_AFTER = 8
+# you're this close to a door's box when you bump: it's that door you pushed (a door is a 4 x 32 plank)
+DOOR_NEAR = 12
+# pushed a door this many times on a floor and it never opened: a fake one - a wall there, for good (doors.json).
+# Not after one push: a dialogue freezes the game and stops you at a real door too
+DOOR_TRIES = 2
+# two bumps at the same door closer than this are ONE try (one push, or one dialogue that froze the game)
+DOOR_AGAIN = 4
 # what the bot is doing, for tools/radar.py (the same name is in tools/radar.py) - rewritten this often
 NOW_FILE = "/tmp/hmbot_now.json"
 SHARE_EVERY = 0.1
@@ -179,6 +185,11 @@ class Eyes:
     )  # (x, y) of the level's things to take (the briefcase...)
     stairs: tuple | None = None  # (x, y) of the stairs with GO! on
     car: tuple | None = None  # (x, y) of the car when the chapter is done
+    scene: str = ""  # this floor's name from its walls (core/scenes.py)
+    # how many wall cards the table had at the last scan (it changes = a new floor)
+    wall_cards: int = -1
+    # boxes of every door on this floor, real and fake (walls.door_boxes)
+    doors: list = field(default_factory=list)
     # (x, y) of what the red arrow points at (looked for only when no enemy is left)
     arrow: tuple | None = None
     # when you came to this floor (a jump: the stairs, the car, a restart after dying)
@@ -201,6 +212,12 @@ class Eyes:
     lying: bool = False  # the target is knocked out on the floor
     # {card: (x, y)} of those you see that are NOT lying - they can hit you
     threats: dict = field(default_factory=dict)
+    # how fast the target runs at you (px/s, his own steps; >0 = toward you)
+    closing: float = 0.0
+    last_spots: dict = field(
+        default_factory=dict
+    )  # last frame's spots - to see how they move
+    last_seen_at: float = 0.0
 
 
 @dataclass
@@ -237,15 +254,25 @@ class Legs:
 
     path: list | None = None
     next_plan: float = 0  # when to search for the way again
+    planned_at: float = (
+        -math.inf
+    )  # when the way was searched last (before you arrived on this floor = search again)
     held: set = field(default_factory=set)  # walking keys we hold now
     learned: dict = field(
         default_factory=dict
     )  # cell -> until when it's blocked: things we bumped into
+    # where you were when you started pushing toward the path point
     pushed_from: tuple = (
         0,
         0,
-    )  # where you were when you started pushing toward the path point
+    )
     pushed_since: float = 0  # ...and when
+    # the floor `learned` is about (another floor - forget it, the floors lie one above the other)
+    scene: str = ""
+    # door box -> how many times we pushed it on this floor in vain
+    door_tries: dict = field(default_factory=dict)
+    # door box -> when we last counted a try at it
+    door_tried_at: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -411,7 +438,10 @@ def let_go(hands, now):
     if hands.release_at is not None and now >= hands.release_at:
         release_left(mem, mem_rw)
         hands.release_at = None
-        hands.rest_hand = None  # (no swing came in SWING_WAIT - stop waiting for it)
+        if hands.rest_hand is not None:
+            # we held it for a swing that never came: stay up a moment, so the next press is a NEW press
+            hands.next_swing = now + RELEASE_GAP
+        hands.rest_hand = None
     if hands.space_up_at is not None and now >= hands.space_up_at:
         key_up(mem, mem_rw, KEY_SPACE)
         hands.space_up_at = None
@@ -431,24 +461,35 @@ def see(eyes, now):
         eyes.enemies = {r for r in shelf.cards if is_enemy(shelf, r, rules)}
     if now >= eyes.next_scan:
         records = shelf.records
+        # the stairs take you to a new floor WITHOUT a pause (the floors lie one above the other), so the walls
+        # must be read again at once, not up to WALLS_EVERY later - with the old walls the way leads you straight
+        # back onto the stairs. Counting the wall cards in the table is cheap, so it's done every scan
+        wall_cards = sum(
+            1 for card in records if read_kind(shelf, card, 0, 0x14) == WALL
+        )
+        if wall_cards != eyes.wall_cards:
+            eyes.wall_cards = wall_cards
+            eyes.next_walls = 0
         if now >= eyes.next_walls:
             # every wall and sofa ONCE: a list of (xy, box) pairs
             walls = real_walls(shelf, records, shelf.cards)
+            # the same walls -> the same name. A NEW name = you're on a new floor (the stairs, the car, a new level)
+            scene = scene_id(walls)
+            if scene != eyes.scene:
+                eyes.arrived_at = now
+            eyes.scene = scene
             # the positions -> the lines you can't see through
             eyes.lines = wall_lines([xy for xy, box in walls])
             # the boxes (+ the fake doors) -> the cells you can't stand in
-            boxes = [box for xy, box in walls] + fake_door_boxes(shelf, records)
+            # every door, real or fake - which one never opens, only pushing it tells (walk() finds out)
+            eyes.doors = door_boxes(shelf, shelf.cards)
+            # the boxes (+ the doors we know never open on this floor) -> the cells you can't stand in
+            boxes = [box for xy, box in walls] + [
+                tuple(box) for box in fake_doors.get(scene, [])
+            ]
             eyes.blocked = blocked_cells(boxes)
             eyes.next_walls = now + WALLS_EVERY
         stairs = find_stairs(shelf, records)
-        # the stairs went off while you were on them: you used them - a new floor. The floors lie one above the
-        # other, you come out at the same x, y (no JUMP) - so this is how you see you arrived by stairs
-        if (
-            eyes.stairs is not None
-            and stairs is None
-            and math.dist(eyes.you, eyes.stairs) < ON_STAIRS
-        ):
-            eyes.arrived_at = now
         # the stairs you came by - lit right after you arrived, right next to you: they lead BACK
         if (
             stairs is not None
@@ -457,7 +498,7 @@ def see(eyes, now):
         ):
             eyes.came_by = stairs
         if stairs is None:
-            # they went off (enemies came, or you used them): when they light up again, the floor is done
+            # they went off (enemies came, or you came close): when they light up again, the floor is done
             eyes.came_by = None
         eyes.stairs = stairs
         eyes.car = find_car(shelf, records, shelf.cards)
@@ -511,6 +552,20 @@ def see(eyes, now):
     eyes.lying = (
         eyes.target is not None and read_kind(shelf, eyes.target, 0, 0x10) in KNOCKED
     )
+    # how fast the target runs at you - his own steps over the last CLOSING_EVERY, not yours
+    if now - eyes.last_seen_at >= CLOSING_EVERY:
+        eyes.closing = 0.0
+        if eyes.target in eyes.last_spots:
+            (x0, y0), (x1, y1) = eyes.last_spots[eyes.target], eyes.spots[eyes.target]
+            far = math.dist((x1, y1), eyes.you)
+            if far > 0:
+                # his step, measured along the line from him to you, per second
+                eyes.closing = (
+                    ((x1 - x0) * (eyes.you[0] - x1) + (y1 - y0) * (eyes.you[1] - y1))
+                    / far
+                    / (now - eyes.last_seen_at)
+                )
+        eyes.last_spots, eyes.last_seen_at = dict(eyes.spots), now
     eyes.hidden = where(shelf, eyes.still)
     # the red arrow - only when nobody is left (in a fight it's not needed, and it costs a little every frame)
     eyes.arrow = None if eyes.still else watch.update(now)
@@ -553,6 +608,11 @@ def decide(eyes, hands, now):
                 close_enough=0,
                 text=f"BACKING OFF {enemy_far:3.0f} away, ready in {time_left:.2f} s",
             )
+        if not eyes.lying and eyes.closing > CHARGE_SPEED and enemy_far < MEET_FAR:
+            # he runs at you: stand and let him come into your swing (act() presses early enough)
+            return Plan(
+                text=f"MEETING a charging enemy {enemy_far:3.0f} away, {eyes.closing:3.0f}/s"
+            )
         return Plan(
             goal=target_xy,
             close_enough=EXECUTE_WALK if eyes.lying else REACH,
@@ -587,6 +647,14 @@ def decide(eyes, hands, now):
             close_enough=0,
             text=f"TO THE STAIRS {math.dist(eyes.stairs, you):3.0f} away",
         )
+    # a floor we were shown a spot on (tools/scene_tool.py), and nothing else to do: walk there
+    spot = scenes.get(eyes.scene)
+    if spot is not None:
+        return Plan(
+            goal=tuple(spot),
+            close_enough=SPOT_WALK,
+            text=f"TO THE SHOWN SPOT {math.dist(spot, you):3.0f} away",
+        )
     return Plan(text="no enemy in sight")
 
 
@@ -611,8 +679,9 @@ def act(plan, eyes, hands, now):
                 hands.next_swing = now + EXEC_EVERY
                 hands.mounted_until = now + MOUNTED_FOR
         elif (
-            far < REACH
+            far < REACH + max(0.0, eyes.closing) * SWING_LEAD
             and hands.release_at is None
+            and now >= hands.next_swing
             and (now >= hands.ready_at or eyes.hand == hands.at_rest)
         ):
             start_swing(hands, eyes, now)
@@ -674,22 +743,51 @@ def act(plan, eyes, hands, now):
         # everything has stood still for a while: a dialogue - click it on
         click(hands, now)
         hands.next_swing = now + USE_EVERY
-    if plan.goal is None and eyes.target is None:
+    # nothing to do (no goal, or already standing at it) and no enemy: a dialogue, the score screen - tap LMB
+    if (plan.goal is None or not wants_to_walk) and eyes.target is None:
         idle_tap(hands, now)
     else:
         hands.idle_since = None
 
 
+def door_at(you, doors):
+    """The door you stand at (its box), or None: you're within DOOR_NEAR of its box."""
+    for left, top, right, bottom in doors:
+        if (
+            left - DOOR_NEAR < you[0] < right + DOOR_NEAR
+            and top - DOOR_NEAR < you[1] < bottom + DOOR_NEAR
+        ):
+            return (left, top, right, bottom)
+    return None
+
+
+def fake_door(eyes, legs, door):
+    """We pushed this door DOOR_TRIES times and it never opened: a wall for good - now, and on every next visit."""
+    legs.learned.update({cell: math.inf for cell in blocked_cells([door])})
+    saved = fake_doors.setdefault(eyes.scene, [])
+    if list(door) not in saved:
+        saved.append(list(door))
+        save_doors(fake_doors)
+    print(
+        f"\nFAKE DOOR at {door} - it never opens, remembered for this floor ({eyes.scene})"
+    )
+
+
 def walk(plan, eyes, legs, now):
     """The legs: walk to plan.goal - straight when it's close and you can see it, else along the path."""
     you, goal = eyes.you, plan.goal
+    if legs.scene != eyes.scene:
+        # another floor: what we bumped into on the last one isn't here (the floors lie one above the other)
+        # (the door tries stay: they're counted per floor, so a retry after a death still counts)
+        legs.learned.clear()
+        legs.scene = eyes.scene
     keys = set()
     point = None  # the path point we push toward this frame (None = not walking along a path)
     if goal is not None and math.dist(goal, you) > plan.close_enough:
         if math.dist(goal, you) < STRAIGHT and can_see(you, goal, eyes.lines):
             keys = keys_toward(you, goal)  # the last bit: straight there, no path
         else:
-            if now >= legs.next_plan:
+            if now >= legs.next_plan or legs.planned_at < eyes.arrived_at:
                 # forget the old bumps, walk around the rest - the walls don't know those things
                 legs.learned = {
                     cell: until for cell, until in legs.learned.items() if until > now
@@ -707,6 +805,7 @@ def walk(plan, eyes, legs, now):
                     avoid = avoid | blocked_cells([box])
                 legs.path = find_path(you, goal, avoid)
                 legs.next_plan = now + REPLAN
+                legs.planned_at = now
             if legs.path is not None:
                 point = next_point(legs.path, you)
                 if point is None:
@@ -725,9 +824,17 @@ def walk(plan, eyes, legs, now):
             now,
         )  # not pushing, or moving fine: start counting again
     elif now - legs.pushed_since > BUMP_AFTER:
-        legs.learned[cell_of(point)] = (
-            now + FORGET_AFTER
-        )  # that cell is blocked for a while
+        # that cell is blocked for a while
+        legs.learned[cell_of(point)] = now + FORGET_AFTER
+        door = door_at(you, eyes.doors)
+        if door is not None:
+            tried = (eyes.scene, door)  # this door on THIS floor - the same spot on another floor is another door
+            if now - legs.door_tried_at.get(tried, -math.inf) > DOOR_AGAIN:
+                # a NEW try at a door that didn't open (not the same push again): count it - the DOOR_TRIES-th is a fake
+                legs.door_tried_at[tried] = now
+                legs.door_tries[tried] = legs.door_tries.get(tried, 0) + 1
+                if legs.door_tries[tried] >= DOOR_TRIES:
+                    fake_door(eyes, legs, door)
         legs.next_plan = now  # a new way right now, around it
         legs.pushed_from, legs.pushed_since = you, now
         print(f"\nBUMPED into something at {point} - going around it")
@@ -780,6 +887,10 @@ faulthandler.register(signal.SIGUSR1, file=stuck_file)
 rules = load_rules()
 # weapon frame -> {"name": ..., "kind": ...}
 names = load_names()
+# floor name -> [x, y] of the spot to walk to (tools/scene_tool.py)
+scenes = load_scenes()
+# floor name -> boxes of the doors that never open there (walk() learns them by pushing)
+fake_doors = load_doors()
 # the red arrow: a little search every frame (core/arrow.py)
 watch = ArrowWatch(mem, regions)
 if not rules:

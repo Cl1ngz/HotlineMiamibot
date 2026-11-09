@@ -17,6 +17,10 @@ FLOOR = 0xFFFFFF9C
 FAKE_DOOR = 0x20
 # the wall layer (walls AND sofas) - the same on every floor so far
 WALL = 0x9
+# a door (real or fake) is a thin plank: at most this thick, and this long (floor 2: 4 x 32, the ground floor by
+# the car: 4 x 32 both - the fake one at the bottom AND the real one by the small stairs)
+DOOR_THIN = (2, 12)
+DOOR_LONG = (24, 40)
 
 
 def real_walls(mem, records, cards=None):
@@ -87,6 +91,28 @@ def crosses(p1, p2, q1, q2):
 # if no wall the u see
 def can_see(a, b, lines):
     return not any(crosses(a, b, q1, q2) for q1, q2 in lines)
+
+
+def door_boxes(mem, cards):
+    """Boxes of every door on the floor - a thin plank that isn't a wall piece. Real doors AND fake ones:
+    which one never opens, only pushing it tells (hmbot remembers those in doors.json, core/scenes.py).
+    """
+    boxes = set()
+    for card in cards:
+        try:
+            if read_kind(mem, card, 0, 0x14) == WALL:
+                continue
+            xy = (read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF))
+            box = read_box(mem, card, xy)
+        except OSError:
+            continue
+        thin, long = sorted((box[2] - box[0], box[3] - box[1]))
+        if (
+            DOOR_THIN[0] <= thin <= DOOR_THIN[1]
+            and DOOR_LONG[0] <= long <= DOOR_LONG[1]
+        ):
+            boxes.add(box)  # a set: the table and the shelf can both have the same door
+    return sorted(boxes)
 
 
 def fake_door_boxes(mem, records):

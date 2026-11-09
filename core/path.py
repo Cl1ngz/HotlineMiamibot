@@ -17,6 +17,10 @@ import math
 
 # size of one cell in game units (a wall piece is 32)
 CELL = 16
+# the cells are shifted by half a cell: their middles sit at 0, 16, 32, 48... A doorway in a wall of 32-pieces
+# is e.g. 416-448 - its middle 432 is now a cell's middle (before: the line BETWEEN two cells), so the way goes
+# through the MIDDLE of a door. At its edge you push next to the hinge, and the door doesn't swing open
+SHIFT = CELL / 2
 # stop after trying this many cells - the goal is unreachable (or the floor is huge)
 MAX_CELLS = 5000
 # right, left, down, up
@@ -27,12 +31,12 @@ HALF = 8
 
 def cell_of(xy):
     """Which cell the point (x, y) is in."""
-    return (int(xy[0] // CELL), int(xy[1] // CELL))
+    return (int((xy[0] + SHIFT) // CELL), int((xy[1] + SHIFT) // CELL))
 
 
 def middle(cell):
     """The point in the middle of a cell."""
-    return (cell[0] * CELL + CELL / 2, cell[1] * CELL + CELL / 2)
+    return (cell[0] * CELL, cell[1] * CELL)
 
 
 def blocked_cells(boxes):
@@ -44,8 +48,10 @@ def blocked_cells(boxes):
         top -= HALF
         right += HALF
         bottom += HALF
-        for cx in range(int(left // CELL), int(right // CELL) + 1):
-            for cy in range(int(top // CELL), int(bottom // CELL) + 1):
+        for cx in range(int((left + SHIFT) // CELL), int((right + SHIFT) // CELL) + 1):
+            for cy in range(
+                int((top + SHIFT) // CELL), int((bottom + SHIFT) // CELL) + 1
+            ):
                 mx, my = middle((cx, cy))
                 if left < mx < right and top < my < bottom:
                     blocked.add((cx, cy))

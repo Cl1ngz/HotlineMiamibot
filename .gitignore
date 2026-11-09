@@ -5,4 +5,5 @@ stuck.txt
 *.npz
 enemy_tool.json
 arrow_find.json
-
+chains_*.json
+find_room.json
