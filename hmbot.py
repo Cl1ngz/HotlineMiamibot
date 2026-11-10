@@ -144,6 +144,9 @@ MOVED_A_BIT = 2
 BUMP_AFTER = 0.4
 # ...and forget it after this long (a dialogue also stops you - it shouldn't block a cell for ever)
 FORGET_AFTER = 8
+# just arrived (a restart after a death, a new floor): the game holds you still for ~2 s, and pushing then
+# is no bump. Bumps count again once you've moved from the arrival spot, or after SETTLE (you really stand at something)
+SETTLE = 3
 # you're this close to a door's box when you bump: it's that door you pushed (a door is a 4 x 32 plank)
 DOOR_NEAR = 12
 # pushed a door this many times on a floor and it never opened: a fake one - a wall there, for good (doors.json).
@@ -273,6 +276,9 @@ class Legs:
     door_tries: dict = field(default_factory=dict)
     # door box -> when we last counted a try at it
     door_tried_at: dict = field(default_factory=dict)
+    # the arrival the legs know about (a copy of eyes.arrived_at) and where you stood then
+    arrived_at: float = -math.inf
+    arrived_from: tuple = (0, 0)
 
 
 @dataclass
@@ -781,6 +787,13 @@ def walk(plan, eyes, legs, now):
         # (the door tries stay: they're counted per floor, so a retry after a death still counts)
         legs.learned.clear()
         legs.scene = eyes.scene
+    if legs.arrived_at != eyes.arrived_at:
+        # just arrived: remember where - until you move from here the game may be holding you still
+        legs.arrived_at, legs.arrived_from = eyes.arrived_at, you
+    settled = (
+        math.dist(you, legs.arrived_from) > MOVED_A_BIT
+        or now - legs.arrived_at > SETTLE
+    )
     keys = set()
     point = None  # the path point we push toward this frame (None = not walking along a path)
     if goal is not None and math.dist(goal, you) > plan.close_enough:
@@ -792,7 +805,7 @@ def walk(plan, eyes, legs, now):
                 legs.learned = {
                     cell: until for cell, until in legs.learned.items() if until > now
                 }
-                avoid = eyes.blocked | set(legs.learned)
+                avoid = eyes.blocked
                 # lit stairs that aren't the goal: stepping on them takes you to another floor - walk around them
                 if eyes.stairs is not None and goal != eyes.stairs:
                     x, y = eyes.stairs
@@ -803,7 +816,22 @@ def walk(plan, eyes, legs, now):
                         y + STAIRS_SIZE,
                     )
                     avoid = avoid | blocked_cells([box])
-                legs.path = find_path(you, goal, avoid)
+                legs.path = find_path(you, goal, avoid | set(legs.learned))
+                # the bumps (not the fake doors - they stay for ever, until = inf)
+                bumps = {cell for cell, until in legs.learned.items() if until != math.inf}
+                if bumps and cell_of(legs.path[-1]) != cell_of(goal):
+                    # the goal can't be reached. Because of the bumps? A bump may make you walk AROUND
+                    # something, but never cut the goal off: a frozen game (the start of a level, a dialogue)
+                    # looks like a bump too. Without the bumps there's a way: forget them and take it
+                    free = find_path(you, goal, avoid | (set(legs.learned) - bumps))
+                    if cell_of(free[-1]) == cell_of(goal):
+                        legs.path = free
+                        legs.learned = {
+                            cell: until
+                            for cell, until in legs.learned.items()
+                            if cell not in bumps
+                        }
+                        print("\nthe bumps cut the goal off - forgot them, taking the way through")
                 legs.next_plan = now + REPLAN
                 legs.planned_at = now
             if legs.path is not None:
@@ -823,7 +851,7 @@ def walk(plan, eyes, legs, now):
             you,
             now,
         )  # not pushing, or moving fine: start counting again
-    elif now - legs.pushed_since > BUMP_AFTER:
+    elif now - legs.pushed_since > BUMP_AFTER and settled:
         # that cell is blocked for a while
         legs.learned[cell_of(point)] = now + FORGET_AFTER
         door = door_at(you, eyes.doors)
