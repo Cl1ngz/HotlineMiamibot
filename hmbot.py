@@ -26,18 +26,40 @@ from dataclasses import dataclass, field
 from core import lockon
 from core.arrow import ArrowWatch
 from core.enemies import find_aim, find_me_card, is_enemy, load_rules
-from core.hands import (KEY_SPACE, find_button, find_look, key_down, key_up,
-                        look_at, press_left, press_right, release_left,
-                        release_right)
+from core.hands import (
+    KEY_SPACE,
+    find_button,
+    find_look,
+    key_down,
+    key_up,
+    look_at,
+    press_left,
+    press_right,
+    release_left,
+    release_right,
+)
 from core.legs import hold, keys_toward, next_point
-from core.memory import (X_OFF, Y_OFF, attach, open_rw, read_double, read_kind,
-                         table_cards)
+from core.memory import (
+    X_OFF,
+    Y_OFF,
+    attach,
+    open_rw,
+    read_double,
+    read_kind,
+    table_cards,
+)
 from core.path import blocked_cells, cell_of, find_path
 from core.scenes import load_doors, load_scenes, save_doors, scene_id
 from core.shelf import Shelf
 from core.stairs import find_car, find_stairs
-from core.walls import (WALL, can_see, door_boxes, fake_door_boxes, real_walls,
-                        wall_lines)
+from core.walls import (
+    WALL,
+    can_see,
+    door_boxes,
+    fake_door_boxes,
+    real_walls,
+    wall_lines,
+)
 from core.weapons import find_goals, find_weapons, load_names
 
 FPS = 60  # the game runs at 60 frames per second, no point going faster
@@ -45,8 +67,8 @@ FPS = 60  # the game runs at 60 frames per second, no point going faster
 SCAN_EVERY = 0.25
 # walls, sofas and fake doors never move - look for them less often
 WALLS_EVERY = 2.0
-# an enemy this close gets hit
-REACH = 35
+# an enemy this close gets hit (the logs: every swing at 23-39 killed, one even at 45)
+REACH = 38
 # seconds to hold a button (SPACE, the right button, and the left one while sitting on an enemy)
 HOLD = 0.15
 # seconds between two SPACE presses / two clicks while sitting on an enemy
@@ -89,8 +111,17 @@ CHARGE_SPEED = 60
 # ...when he's this close (further away: walk on, he may still turn)
 MEET_FAR = 150
 # from the press to the hit takes about this long: against a charger press when he's this many seconds of his
-# run further than REACH (the 3 deaths on the metro's floor 2: LMB at 24-31, dead one frame later)
-SWING_LEAD = 0.15
+# run further than REACH. The logs: the enemy dies ONE frame (0.03-0.04 s) after the press - so a short lead
+# (0.15 pressed at ~62 against a charger and hit the air, then the weapon wasn't ready when he came)
+SWING_LEAD = 0.04
+# a standing enemy this close: aim at the NEAREST one, whoever we aimed at before
+# (two run at you - the one who gets there first is the one to hit first)
+NEAREST_FIRST = 120
+# a door between you and the enemy: through a CLOSED door he's never closer than ~32 (the log: 32-34), so
+# closer than this the door must be open already (eyes.doors is read only every WALLS_EVERY) - swing then
+DOOR_SWING = 30
+# backing off: a step only where there's this much free room (no wall, no sofa) - never back into a wall
+BACK_ROOM = 48
 # measure his run over this long (every frame is too jumpy: the bot can read the same game frame twice)
 CLOSING_EVERY = 0.1
 # the stairs that light up this soon after you came to a floor, this close to you, are the ones you came by:
@@ -213,6 +244,8 @@ class Eyes:
     )  # {card: (x, y)} of all of them, also behind walls
     target: int | None = None  # the one lockon aims at (always one of spots)
     lying: bool = False  # the target is knocked out on the floor
+    # a door lies between you and the target: a swing only hits the door - walk INTO it, it swings open
+    behind_door: bool = False
     # {card: (x, y)} of those you see that are NOT lying - they can hit you
     threats: dict = field(default_factory=dict)
     # how fast the target runs at you (px/s, his own steps; >0 = toward you)
@@ -257,9 +290,7 @@ class Legs:
 
     path: list | None = None
     next_plan: float = 0  # when to search for the way again
-    planned_at: float = (
-        -math.inf
-    )  # when the way was searched last (before you arrived on this floor = search again)
+    planned_at: float = -math.inf  # when the way was searched last (before you arrived on this floor = search again)
     held: set = field(default_factory=set)  # walking keys we hold now
     learned: dict = field(
         default_factory=dict
@@ -345,15 +376,51 @@ def choose_weapon(weapons, you, enemy_far, lines):
     return nearest
 
 
-def away_from(you, enemy, step):
-    """The point `step` away from you, straight AWAY from the enemy."""
-    dist = math.dist(you, enemy)
-    if dist == 0:
-        return you
-    return (
-        you[0] + (you[0] - enemy[0]) / dist * step,
-        you[1] + (you[1] - enemy[1]) / dist * step,
-    )
+def crosses_box(a, b, box):
+    """Does the straight line from a to b go through the box (left, top, right, bottom)?
+    (the "slab" test: where the line enters and leaves the box's x range, the same for y - do they overlap?)"""
+    t_in, t_out = (
+        0.0,
+        1.0,
+    )  # the part of the line inside the box so far: 0 = at a, 1 = at b
+    for start, step, low, high in (
+        (a[0], b[0] - a[0], box[0], box[2]),
+        (a[1], b[1] - a[1], box[1], box[3]),
+    ):
+        if step == 0:
+            if not low <= start <= high:
+                return False  # parallel to this side and outside it
+            continue
+        enter, leave = sorted(((low - start) / step, (high - start) / step))
+        t_in, t_out = max(t_in, enter), min(t_out, leave)
+        if t_in > t_out:
+            return False
+    return True
+
+
+def back_off_point(you, threats, blocked, lines):
+    """Where to step back to while the weapon gets ready - or None: no room (a wall or a corner behind you).
+    Of 8 directions, the one with BACK_ROOM free room that leaves you furthest from the closest enemy:
+    straight back when there's room, along the wall when there isn't."""
+    closest_now = min(math.dist(you, xy) for xy in threats)
+    best, best_far = None, closest_now
+    for i in range(8):
+        dx, dy = math.cos(i * math.pi / 4), math.sin(i * math.pi / 4)
+        step = (you[0] + dx * BACK_STEP, you[1] + dy * BACK_STEP)
+        room = (you[0] + dx * BACK_ROOM, you[1] + dy * BACK_ROOM)
+        if (
+            cell_of(step) in blocked
+            or cell_of(room) in blocked
+            or not can_see(you, room, lines)
+        ):
+            continue  # a wall there - no room to step back
+        far = min(
+            math.dist(step, xy) for xy in threats
+        )  # the closest enemy after the step
+        if far > best_far:
+            best, best_far = step, far
+    # None = every free step takes you closer to someone: cornered
+    return best
 
 
 def wait_for_game(mem):
@@ -553,10 +620,28 @@ def see(eyes, now):
         for card, xy in eyes.threats.items()
         if math.dist(xy, eyes.you) < EXEC_SAFE
     }
-    # an empty dict counts as False: "danger or eyes.spots" = danger if there is any, else everyone
-    eyes.target = lockon.choose_target(shelf, danger or eyes.spots, eyes.you, rules)
+    # someone standing is close: the NEAREST one, whoever we aimed at before (lockon keeps its target until
+    # another is clearly closer - two side by side, and the other one gets there first)
+    near = {
+        card: xy
+        for card, xy in eyes.threats.items()
+        if math.dist(xy, eyes.you) < NEAREST_FIRST
+    }
+    if near:
+        nearest = min(near, key=lambda card: math.dist(near[card], eyes.you))
+        pick = {nearest: near[nearest]}
+    else:
+        # an empty dict counts as False: "danger or eyes.spots" = danger if there is any, else everyone
+        pick = danger or eyes.spots
+    eyes.target = lockon.choose_target(shelf, pick, eyes.you, rules)
     eyes.lying = (
         eyes.target is not None and read_kind(shelf, eyes.target, 0, 0x10) in KNOCKED
+    )
+    # a real door between you and the target (the fake ones are walls already)
+    eyes.behind_door = eyes.target is not None and any(
+        crosses_box(eyes.you, eyes.spots[eyes.target], box)
+        for box in eyes.doors
+        if list(box) not in fake_doors.get(eyes.scene, [])
     )
     # how fast the target runs at you - his own steps over the last CLOSING_EVERY, not yours
     if now - eyes.last_seen_at >= CLOSING_EVERY:
@@ -603,16 +688,32 @@ def decide(eyes, hands, now):
         )
 
     if target_xy is not None:
+        if eyes.behind_door and not eyes.lying:
+            # a closed door between you: a swing only hits the door (then the weapon isn't ready, you back off,
+            # come back, hit the door again...) - walk INTO the door: it swings open, and knocks him down
+            # if he stands right behind it
+            return Plan(
+                goal=target_xy,
+                close_enough=0,
+                text=f"THROUGH THE DOOR to an enemy {enemy_far:3.0f} away",
+            )
         # back off: he stands, the weapon isn't ready yet, and he'll be in reach before it is
         if (
             not eyes.lying
             and time_left > 0
             and enemy_far < REACH + ENEMY_SPEED * time_left
         ):
+            threats = list(eyes.threats.values()) or [target_xy]
+            back = back_off_point(you, threats, eyes.blocked, eyes.lines)
+            if back is not None:
+                return Plan(
+                    goal=back,
+                    close_enough=0,
+                    text=f"BACKING OFF {enemy_far:3.0f} away, ready in {time_left:.2f} s",
+                )
+            # no room behind you: running into the wall is the end - stand, the swing comes the moment it's ready
             return Plan(
-                goal=away_from(you, target_xy, BACK_STEP),
-                close_enough=0,
-                text=f"BACKING OFF {enemy_far:3.0f} away, ready in {time_left:.2f} s",
+                text=f"CORNERED {enemy_far:3.0f} away, ready in {time_left:.2f} s - standing"
             )
         if not eyes.lying and eyes.closing > CHARGE_SPEED and enemy_far < MEET_FAR:
             # he runs at you: stand and let him come into your swing (act() presses early enough)
@@ -689,6 +790,7 @@ def act(plan, eyes, hands, now):
             and hands.release_at is None
             and now >= hands.next_swing
             and (now >= hands.ready_at or eyes.hand == hands.at_rest)
+            and (not eyes.behind_door or far < DOOR_SWING)
         ):
             start_swing(hands, eyes, now)
 
@@ -818,7 +920,9 @@ def walk(plan, eyes, legs, now):
                     avoid = avoid | blocked_cells([box])
                 legs.path = find_path(you, goal, avoid | set(legs.learned))
                 # the bumps (not the fake doors - they stay for ever, until = inf)
-                bumps = {cell for cell, until in legs.learned.items() if until != math.inf}
+                bumps = {
+                    cell for cell, until in legs.learned.items() if until != math.inf
+                }
                 if bumps and cell_of(legs.path[-1]) != cell_of(goal):
                     # the goal can't be reached. Because of the bumps? A bump may make you walk AROUND
                     # something, but never cut the goal off: a frozen game (the start of a level, a dialogue)
@@ -831,7 +935,9 @@ def walk(plan, eyes, legs, now):
                             for cell, until in legs.learned.items()
                             if cell not in bumps
                         }
-                        print("\nthe bumps cut the goal off - forgot them, taking the way through")
+                        print(
+                            "\nthe bumps cut the goal off - forgot them, taking the way through"
+                        )
                 legs.next_plan = now + REPLAN
                 legs.planned_at = now
             if legs.path is not None:
@@ -856,7 +962,10 @@ def walk(plan, eyes, legs, now):
         legs.learned[cell_of(point)] = now + FORGET_AFTER
         door = door_at(you, eyes.doors)
         if door is not None:
-            tried = (eyes.scene, door)  # this door on THIS floor - the same spot on another floor is another door
+            tried = (
+                eyes.scene,
+                door,
+            )  # this door on THIS floor - the same spot on another floor is another door
             if now - legs.door_tried_at.get(tried, -math.inf) > DOOR_AGAIN:
                 # a NEW try at a door that didn't open (not the same push again): count it - the DOOR_TRIES-th is a fake
                 legs.door_tried_at[tried] = now
