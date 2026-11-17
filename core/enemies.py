@@ -22,14 +22,21 @@ INSTANCE = 0x6D0  # bytes in the bigger object behind the record's first pointer
 AIM_PICTURE = 0xA5  # the crosshair's picture (folder +0x10) - always the same; its layer is NOT (0xAF, outside by the dumpster 0x1)
 
 
+# where you were the last time find_me_card found you: picks the right card when several look like you
+me_last_xy = None
+
+
 def find_me_card(mem):
+    """Your card (layer 0x2C, picture 0x47), or None: the menu, loading, sitting on an enemy.
+    Several cards can look like you (a leftover from the floor you just left): the empty ones (card +0x4 = 0,
+    like the ghost enemies) go first, then the one closest to the crosshair - or, with no crosshair, to where
+    you were last time. With at least one card that looks like you, the answer is never None."""
+    global me_last_xy
     cards = table_records(mem)
     if not cards:
         return None
-    # now ex found = {0x2422de8: (320, 472), 0x2424150: (388, 160)}
     found = {}
-    # 64 cards is jsut a guess resonable number to compute
-    # thats why try exept is here cus fricking errors
+    # 64 cards around the table: a guess, big enough so far (helpers_for_me/far_cards.py checks it)
     for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
         try:
             if (
@@ -42,25 +49,30 @@ def find_me_card(mem):
                 )
         except OSError:
             continue
-    # menu or loading
     if not found:
         return None
+    if len(found) > 1:
+        # a leftover copy is empty inside, like the ghost enemies (only if that leaves somebody)
+        alive = {
+            card: xy for card, xy in found.items() if read_kind(mem, card, 0, 0x4) != 0
+        }
+        found = alive or found
     if len(found) == 1:
-        return list(found)[0]
-
-    # more that one you
-    # closes to the crosshair is the real one i guess
-    aims = []
-    for card, xy in cards.items():
-        try:
-            if read_kind(mem, card, 0, 0x14) == 0xAF:
-                aims.append(xy)
-        except OSError:
-            # empty space this card reserve probobly causes it
-            continue
-    if not aims:
-        return None
-    return min(found, key=lambda card: min(math.dist(found[card], aim) for aim in aims))
+        me = next(iter(found))
+    else:
+        # still several: the one closest to the crosshair (known by its picture - its layer changes per floor),
+        # with no crosshair the one closest to where you were last time
+        aim = find_aim_card(mem)
+        if aim is not None:
+            point = (read_double(mem, aim + X_OFF), read_double(mem, aim + Y_OFF))
+        else:
+            point = me_last_xy
+        if point is None:
+            me = next(iter(found))
+        else:
+            me = min(found, key=lambda card: math.dist(found[card], point))
+    me_last_xy = found[me]
+    return me
 
 
 # My (x, y), or None

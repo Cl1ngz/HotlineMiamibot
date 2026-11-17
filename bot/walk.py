@@ -107,19 +107,17 @@ def walk(plan, eyes, legs, now):
                 point = next_point(legs.path, you)
                 if point is None:
                     # the end of the path (the cell closest to the goal): the last bit straight at the goal
-                    # (the dumpster: the path ends ~26 away, LMB needs 24)
                     point = goal
                 keys = keys_toward(you, point)
             else:
-                # find_path always gives a way now - this is just in case
                 keys = keys_toward(you, goal)
     # bumped into something? walking along the path, but you haven't moved for BUMP_AFTER
-    # (pushing at the goal itself - the dumpster - is as close as it gets: nothing to learn there)
     if point is None or point == goal or math.dist(you, legs.pushed_from) > MOVED_A_BIT:
+        # not pushing, or moving fine: start counting again
         legs.pushed_from, legs.pushed_since = (
             you,
             now,
-        )  # not pushing, or moving fine: start counting again
+        )
     elif now - legs.pushed_since > BUMP_AFTER and settled:
         # that cell is blocked for a while
         legs.learned[cell_of(point)] = now + FORGET_AFTER
@@ -130,12 +128,13 @@ def walk(plan, eyes, legs, now):
                 door,
             )  # this door on THIS floor - the same spot on another floor is another door
             if now - legs.door_tried_at.get(tried, -math.inf) > DOOR_AGAIN:
-                # a NEW try at a door that didn't open (not the same push again): count it - the DOOR_TRIES-th is a fake
+                # try at a door that didn't open (not the same push again): count it - the DOOR_TRIES-th is a fake
                 legs.door_tried_at[tried] = now
                 legs.door_tries[tried] = legs.door_tries.get(tried, 0) + 1
                 if legs.door_tries[tried] >= DOOR_TRIES:
                     fake_door(eyes, legs, door)
-        legs.next_plan = now  # a new way right now, around it
+        # a new way right now, around it
+        legs.next_plan = now
         legs.pushed_from, legs.pushed_since = you, now
         print(f"\nBUMPED into something at {point} - going around it")
     legs.held = hold(game.mem, game.mem_rw, keys, legs.held)
