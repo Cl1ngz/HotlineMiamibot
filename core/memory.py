@@ -214,3 +214,17 @@ def open_rw():
     mem = os.open(f"/proc/{pid}/mem", os.O_RDWR)
 
     return mem
+
+
+def where(mem, cards):
+    """{card: (x, y)} of these cards - seen or behind a wall."""
+    spots = {}
+    for card in cards:
+        try:
+            spots[card] = (
+                read_double(mem, card + X_OFF),
+                read_double(mem, card + Y_OFF),
+            )
+        except OSError:
+            continue
+    return spots

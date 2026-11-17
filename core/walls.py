@@ -21,6 +21,8 @@ WALL = 0x9
 # the car: 4 x 32 both - the fake one at the bottom AND the real one by the small stairs)
 DOOR_THIN = (2, 12)
 DOOR_LONG = (24, 40)
+# you're this close to a door's box when you bump: it's that door you pushed (a door is a 4 x 32 plank)
+DOOR_NEAR = 12
 
 
 def real_walls(mem, records, cards=None):
@@ -154,3 +156,37 @@ def read_box(mem, card, xy):
 #   left                     right
 #               (x, y+32)
 #                 below
+
+
+def crosses_box(a, b, box):
+    """Does the straight line from a to b go through the box (left, top, right, bottom)?
+    (the "slab" test: where the line enters and leaves the box's x range, the same for y - do they overlap?)
+    """
+    t_in, t_out = (
+        0.0,
+        1.0,
+    )  # the part of the line inside the box so far: 0 = at a, 1 = at b
+    for start, step, low, high in (
+        (a[0], b[0] - a[0], box[0], box[2]),
+        (a[1], b[1] - a[1], box[1], box[3]),
+    ):
+        if step == 0:
+            if not low <= start <= high:
+                return False  # parallel to this side and outside it
+            continue
+        enter, leave = sorted(((low - start) / step, (high - start) / step))
+        t_in, t_out = max(t_in, enter), min(t_out, leave)
+        if t_in > t_out:
+            return False
+    return True
+
+
+def door_at(you, doors):
+    """The door you stand at (its box), or None: you're within DOOR_NEAR of its box."""
+    for left, top, right, bottom in doors:
+        if (
+            left - DOOR_NEAR < you[0] < right + DOOR_NEAR
+            and top - DOOR_NEAR < you[1] < bottom + DOOR_NEAR
+        ):
+            return (left, top, right, bottom)
+    return None

@@ -5,9 +5,11 @@
 # The frame number at card +0x98 says which weapon it is (names: weapon_names.json, made by tools/weapon_tool.py).
 # A goal (the briefcase...) = a card on the floor layer with its own picture (GOAL).
 import json
+import math
 
 from .enemies import shelf_cards
 from .memory import X_OFF, Y_OFF, read_double, read_kind, table_records
+from .walls import can_see
 
 # layer -100: things lying on the floor
 FLOOR = 0xFFFFFF9C
@@ -68,3 +70,16 @@ def find_goals(mem, cards=None):
         except OSError:
             continue
     return found
+
+
+def choose_weapon(weapons, you, enemy_far, lines):
+    """The weapon to go for, (x, y), or None.
+    Only weapons you can see, and only if the nearest one is closer than the enemy (enemy_far = math.inf: no enemy).
+    """
+    seen = [xy for xy in weapons if can_see(you, xy, lines)]
+    if not seen:
+        return None
+    nearest = min(seen, key=lambda xy: math.dist(xy, you))
+    if math.dist(nearest, you) > enemy_far:
+        return None
+    return nearest
