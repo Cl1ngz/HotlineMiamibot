@@ -30,12 +30,14 @@ def find_game():
                 name = f.read().strip()
                 # print(name)
             # statm fiel conntaing detiailed memory usage: {size rezident shared text lib data dt}
+            # 4kb per page
             # [1] reads phisical memory current
             with open(f"/proc/{pid}/statm") as f:
                 ram = int(f.read().split()[1])
                 # print(ram)
         except OSError:
             continue
+        # searching for the bigges cus game can have several cus of wine and proton
         if GAME_NAME in name.lower() and (best is None or ram > best[2]):
             best = (int(pid), name, ram)
     return best
@@ -161,7 +163,6 @@ def load_address(name):
     return [int(v, 16) for v in value] if isinstance(value, list) else int(value, 16)
 
 
-# Same as table_objects, but keyed by the object itself instead of its seat (seats get shuffled).
 def table_records(mem):
     """Every object in the table: {record address: (x, y)}."""
     data = read_bytes(mem, TABLE_END - TABLE_START, TABLE_START)

@@ -16,7 +16,6 @@ from .memory import (
 )
 
 # Size of one table record
-# 4bytes (X at +0x50, Y at +0x58)
 RECORD = 0xB8
 INSTANCE = 0x6D0  # bytes in the bigger object behind the record's first pointer
 AIM_PICTURE = 0xA5  # the crosshair's picture (folder +0x10) - always the same; its layer is NOT (0xAF, outside by the dumpster 0x1)
