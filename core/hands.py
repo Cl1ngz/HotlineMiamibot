@@ -1,29 +1,14 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
-# core/hands.py - the bot's hands: it aims and clicks by WRITING to the game's memory (a library)
-#
-# No fake mouse, no focus needed, your cursor stays yours. Everything is found through chains of links
-# that start at a fixed locker inside the game file (GAME) - they still work after you die or restart.
-#   [GAME] -> +0x3F4 -> +0x460  then +0x8      the look X: where your character looks (a double)
-#   [GAME] -> +0x3F4 -> +0x438  then +0x8      the look Y
-#   [GAME] -> +0x42C -> +0x9C   then +0x52D    the left mouse button in DirectInput (0x80 held, 0 released),
-#                                              +0x52E is the right one
-#   [GAME] -> +0x2B4 -> +0x14   then +0x521    the keyboard row: 256 bytes, one per key (KEY_ numbers below)
-#
-# hmbot uses it like this:
-#   look_at(mem, mem_rw, xy)                 every frame: your character looks at xy (the game puts the mouse back)
-#   press_left / release_left(mem, mem_rw)   hold / let go of the left button (swing, shoot)
-#   press_right / release_right(...)         the right button (pick up / throw)
-#   key_down / key_up(mem, mem_rw, KEY_W)    hold / let go of a key (core/legs.py walks with them)
+# core/hands.py - the bot's hands: aims, clicks and presses keys by writing bytes to the game's memory
+# look_at() every frame, press/release_left/right(), key_down/up() - every chain starts at GAME
 import os
 
 from .memory import read_bytes, read_double, read_u32, write_double
 
-# a locker inside the game file: the same address after every restart
+# start of every chain - a fixed address in the .exe
 GAME = 0xBB0D68
-# look X / look Y: the game's two globals "where the mouse is" - a link to a variable slot, the value at +0x8.
-# The way to them is NOT the same in every launch ([GAME] -> +0x3F4 worked for a week, then led nowhere),
-# so find_look() picks one at the start: the chain whose two values are exactly the crosshair.
-# Y's link always sits 0x28 before X's. All but the first: helpers_for_me/find_path on 9.11.
+# look X / look Y = where the mouse is in the game. The way there changes between launches,
+# so we keep a few known ways and find_look() takes the one whose numbers are the crosshair's X, Y
 LOOK_CHAINS = [
     [0x3F4, 0x460],
     [0x238, 0x4C8],
@@ -33,15 +18,13 @@ LOOK_CHAINS = [
     [0x248, 0x408],
     [0x2D0, 0x4E0],
 ]
-LOOK_Y_BEFORE = 0x28  # Y's link is this many bytes before X's
-LOOK_NEAR = 0.5  # the look and the crosshair are the same number (the game copies the mouse into both)
-# the chains look_at() uses - find_look() puts the right ones here
-LOOK_X = ([0x3F4, 0x460], 0x8)
+LOOK_Y_BEFORE = 0x28  # Y's last link is 0x28 smaller than X's
+LOOK_NEAR = 0.5  # look and crosshair are the same number - 0.5 of room
+LOOK_X = ([0x3F4, 0x460], 0x8)  # find_look() puts the right chains here
 LOOK_Y = ([0x3F4, 0x438], 0x8)
-# the left mouse button: [GAME] -> ... -> the mouse's DirectInput object, the button at +0x52D (+0x52E the right one).
-# The list of objects at [GAME] -> +0x42C moved too (the mouse at +0x9C until 8.11, at +0xA4 on 9.11),
-# so find_button() picks the chain whose object is really the MOUSE: it has the mouse's DirectInput name
-# (GUID_SysMouse) inside. All but the first two: helpers_for_me/find_path on 9.11.
+
+
+# mouse buttons: a few known ways too, find_button() takes the one that ends in the mouse
 BUTTON_CHAINS = [
     [0x42C, 0xA4],
     [0x42C, 0x9C],
@@ -49,18 +32,16 @@ BUTTON_CHAINS = [
     [0x42C, 0x0, 0x74],
     [0x42C, 0x90, 0x14],
 ]
-BUTTON_AT = 0x52D  # the button's place in the mouse's object
+BUTTON_AT = 0x52D  # left button byte in the mouse, the right one is +1
 GUID_SYS_MOUSE = bytes.fromhex(
     "602b1d6fa0d5cf11bfc7444553540000"
-)  # {6F1D2B60-D5A0-11CF-BFC7-444553540000}
-# the chain press_left() and friends use - find_button() puts the right one here
-BUTTON = ([0x42C, 0xA4], BUTTON_AT)
-# DirectInput's "the button is down"
-HELD = b"\x80"
-RELEASED = b"\x00"
+)  # Windows' name for "the mouse" - only the mouse has it inside
+BUTTON = ([0x42C, 0xA4], BUTTON_AT)  # find_button() puts the right chain here
+HELD = b"\x80"  # button down
+RELEASED = b"\x00"  # button up
 
-KEYBOARD = ([0x2B4, 0x14], 0x521)  # DirectInput's keyboard row: 256 bytes, one per key
-# DirectInput's number for every key we use = its place in the row
+KEYBOARD = ([0x2B4, 0x14], 0x521)  # keyboard row: 256 bytes, one per key
+# key number = its place in the keyboard row
 KEY_SPACE = 0x39
 KEY_W = 0x11
 KEY_A = 0x1E

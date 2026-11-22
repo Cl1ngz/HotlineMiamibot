@@ -1,20 +1,11 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
-# core/scenes.py - a name for every floor, and the spots the bot was shown on them (a library)
-#
-# Some floors have nothing that tells the bot where to go: no enemy, no red arrow, no stairs, no car -
-# the masks' room after the tutorial, where the talk starts only when you walk up to them.
-# The same floor always has the same walls in the same places, so the walls give it a name that is the
-# same every time you come back. tools/scene_tool.py saves a spot under that name, once - hmbot walks
-# there by itself (and clicks the talk away) every time it's on that floor and has nothing else to do.
-#
-#   scene_id(walls)      ->  "3fa9c1d2"       (walls = real_walls(...): a list of (xy, box) pairs)
-#   load_scenes()        ->  {name: [x, y]}   (from scenes.json)
-#   save_scenes(spots)
+# core/scenes.py - a name for every floor from its walls, and what the bot remembers per floor
+# scene_id(walls) -> "3fa9c1d2", scenes.json: a spot to walk to (scene_tool), doors.json: fake doors (walk)
 import hashlib
 import json
 import os
 
-SCENES_FILE = "scenes.json"
+SCENES_FILE = "scenes.json"  # floor name -> [x, y]: walk there when there's nothing else to do (the masks' room)
 # floor name -> boxes of the doors that never open there (hmbot pushed them twice and they didn't)
 DOORS_FILE = "doors.json"
 

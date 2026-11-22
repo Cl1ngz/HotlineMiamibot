@@ -3,26 +3,20 @@
 from .enemies import shelf_cards
 from .memory import X_OFF, Y_OFF, read_double, read_kind
 
-# obj_type or kinds to verify if broken
-# values tat go uup its the value
+# wall pieces are 32 long, the next piece sits 32 further
 TILE = 32
-# the box of a thing (found with box_hunt): its FOLDER +0x78 left, +0x7C top, +0x80 right, +0x84 bottom
-#   walls: real map numbers (a wall at 192,128 -> 192, 128, 199, 159: 8 thick, 32 long)
-#   sofas, you: counted from the thing's x, y (a sofa -> -4, -8, 5, 7; you -> -8, -8, 7, 7)
+# a thing's box: 4 numbers in its FOLDER from +0x78 - left, top, right, bottom (found with box_hunt)
+# walls keep real map numbers: a wall at 192,128 -> 192, 128, 199, 159
+# sofas and you keep them counted from your own x, y: a sofa -> -4, -8, 5, 7
 BOX = 0x78
-# nothing in a level is this big - a bigger box is junk (seen after dying on floor 2 + R)
-MAX_BOX = 512
-# a door that NEVER opens (floor 2): floor layer + this folder picture, a 4 x 32 plank
-FLOOR = 0xFFFFFF9C
-FAKE_DOOR = 0x20
-# the wall layer (walls AND sofas) - the same on every floor so far
-WALL = 0x9
-# a door (real or fake) is a thin plank: at most this thick, and this long (floor 2: 4 x 32, the ground floor by
-# the car: 4 x 32 both - the fake one at the bottom AND the real one by the small stairs)
+MAX_BOX = (
+    512  # nothing in a level is this big - a bigger box is junk (seen after dying + R)
+)
+WALL = 0x9  # card +0x14 for walls AND sofas, the same on every floor so far
+# a door is a thin long plank (4 x 32 everywhere so far): thin 2-12, long 24-40
 DOOR_THIN = (2, 12)
 DOOR_LONG = (24, 40)
-# you're this close to a door's box when you bump: it's that door you pushed (a door is a 4 x 32 plank)
-DOOR_NEAR = 12
+DOOR_NEAR = 12  # you bumped this close to a door's box = you pushed that door
 
 
 def real_walls(mem, records, cards=None):
@@ -45,19 +39,19 @@ def real_walls(mem, records, cards=None):
     return found
 
 
-def wall_boxes(mem, records, rules=None):
-    """(left, top, right, bottom) of every wall and sofa. (rules isn't needed any more)"""
-    return [box for xy, box in real_walls(mem, records)]
-
-
-def find_walls(mem, records, rules=None):
-    """(x, y) of every wall and sofa piece - for wall_lines (what you can see through) and the radar."""
-    return [xy for xy, box in real_walls(mem, records)]
-
-
 def signed(value):
-    """A 4-byte number read as a whole number that can be below zero (0xFFFFFFFC -> -4)."""
+    """read_u32 can't give minus numbers: -4 comes out as 4294967292 (0xFFFFFFFC). This turns it back into -4.
+    Sofas' and your boxes need it: they're counted from your middle (-4 = 4 to the left)."""
     return value - (1 << 32) if value >= 1 << 31 else value
+
+
+# visualisation
+#               (x, y-32)
+#                 above
+# (x-32, y)    [ x, y ]    (x+32, y)
+#   left                     right
+#               (x, y+32)
+#                 below
 
 
 def wall_lines(walls):
@@ -77,7 +71,7 @@ def wall_lines(walls):
 
 
 # x * cy - y * cx
-# positive = left, negative = right, 0 = on it
+# which side of the line a-b c is on: + one side, - the other, 0 = on the line
 def side(a, b, c):
     return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 
@@ -117,21 +111,6 @@ def door_boxes(mem, cards):
     return sorted(boxes)
 
 
-def fake_door_boxes(mem, records):
-    """Boxes of the doors that never open - for the way they're walls."""
-    boxes = []
-    for card, xy in records.items():
-        try:
-            if (
-                read_kind(mem, card, 0, 0x14) == FLOOR
-                and read_kind(mem, card, 1, 0x10) == FAKE_DOOR
-            ):
-                boxes.append(read_box(mem, card, xy))
-        except OSError:
-            continue
-    return boxes
-
-
 def read_box(mem, card, xy):
     """(left, top, right, bottom) of a card in map numbers. right and bottom are the EDGE (+1)."""
     x, y = xy
@@ -145,17 +124,8 @@ def read_box(mem, card, xy):
     if not (1 <= right - left <= MAX_BOX and 1 <= bottom - top <= MAX_BOX):
         raise OSError(
             "junk box"
-        )  # real_walls and fake_door_boxes skip OSError, like junk memory
+        )  # real_walls and door_boxes skip OSError, like junk memory
     return left, top, right + 1, bottom + 1
-
-
-# visualisation
-#               (x, y-32)
-#                 above
-# (x-32, y)    [ x, y ]    (x+32, y)
-#   left                     right
-#               (x, y+32)
-#                 below
 
 
 def crosses_box(a, b, box):

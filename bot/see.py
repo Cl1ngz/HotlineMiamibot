@@ -122,9 +122,7 @@ def see(eyes, now):
     if len(eyes.still) < len(eyes.enemies):
         eyes.rescan_until = now + RESCAN_FOR
     # (visible_enemies wants the cards that are alive - that's exactly eyes.still now)
-    eyes.spots = lockon.visible_enemies(
-        shelf, eyes.still, set(eyes.still), eyes.you, eyes.lines
-    )
+    eyes.spots = lockon.visible_enemies(shelf, eyes.still, eyes.you, eyes.lines)
     eyes.threats = {
         card: xy
         for card, xy in eyes.spots.items()
@@ -149,7 +147,7 @@ def see(eyes, now):
     else:
         # an empty dict counts as False: "danger or eyes.spots" = danger if there is any, else everyone
         pick = danger or eyes.spots
-    eyes.target = lockon.choose_target(shelf, pick, eyes.you, game.rules)
+    eyes.target = lockon.choose_target(pick, eyes.you)
     eyes.lying = (
         eyes.target is not None and read_kind(shelf, eyes.target, 0, 0x10) in KNOCKED
     )

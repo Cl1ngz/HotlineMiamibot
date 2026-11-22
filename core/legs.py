@@ -10,8 +10,6 @@ from .hands import KEY_A, KEY_D, KEY_S, KEY_W, key_down, key_up
 
 # closer than this on one axis -> don't press a key for that axis (no zig-zag)
 DEAD_ZONE = 4
-# a path point closer than this counts as reached
-REACHED = 8
 
 
 def keys_toward(you, point):
@@ -30,7 +28,12 @@ def keys_toward(you, point):
 
 
 def next_point(path, you):
-    """The point of the path right AFTER the one closest to you. None = you're at the end."""
+    """The point of the path right AFTER the one closest to you. None = you're at the end.
+    the next point to walk to (None = at the end)
+    path:  A -- B -- C -- D (goal)
+    you stand by B  ->  C
+    you stand by D  ->  None (the end, walk straight to the goal)
+    """
     # the INDEX (0, 1, 2...) of the path point closest to you
     closest = min(range(len(path)), key=lambda i: math.dist(path[i], you))
     if closest == len(path) - 1:

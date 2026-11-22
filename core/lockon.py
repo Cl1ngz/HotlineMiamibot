@@ -23,13 +23,10 @@ target = None
 last_xy = None
 
 
-def visible_enemies(mem, enemies, alive, you, lines):
-    """{card: (x, y)} of the enemies still alive (table or shelf), close to you and not behind a wall."""
+def visible_enemies(mem, enemies, you, lines):
+    """{card: (x, y)} of the enemies close to you and not behind a wall."""
     spots = {}
     for card in enemies:
-        if card not in alive:
-            # the game deleted it, its memory is junk now
-            continue
         try:
             xy = read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF)
         except OSError:
@@ -39,15 +36,14 @@ def visible_enemies(mem, enemies, alive, you, lines):
     return spots
 
 
-def choose_target(mem, spots, you, rules):
+def choose_target(spots, you):
     """Keep the current target, or switch to a clearly closer one. Returns his card, or None."""
     global target, last_xy
-    # drop the target if he died, vanished, went behind a wall or teleported (junk memory)
-    if target is not None:
-        if target not in spots or not is_enemy(mem, target, rules):
-            target = None
-        elif math.dist(spots[target], last_xy) > MAX_JUMP:
-            target = None
+    # drop the target if he's gone from spots (died, behind a wall, too far) or teleported (junk memory)
+    if target is not None and (
+        target not in spots or math.dist(spots[target], last_xy) > MAX_JUMP
+    ):
+        target = None
     # the closest enemy to YOU wins. Keep the current one unless another is clearly closer
     # (otherwise the aim would flick back and forth between two guys at about the same distance)
     if spots:

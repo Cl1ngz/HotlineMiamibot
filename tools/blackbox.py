@@ -41,34 +41,86 @@ from datetime import datetime
 import core.hands as hands
 from core.enemies import find_aim, find_me_card, is_enemy, load_rules, matches
 from core.hands import KEY_A, KEY_D, KEY_R, KEY_S, KEY_SPACE, KEY_W, KEYBOARD, follow
-from core.memory import X_OFF, Y_OFF, attach, read_bytes, read_double, read_kind, read_u32, table_cards
+from core.memory import (
+    X_OFF,
+    Y_OFF,
+    attach,
+    read_bytes,
+    read_double,
+    read_kind,
+    read_u32,
+    table_cards,
+)
 from core.path import blocked_cells
+from core.scenes import load_doors, scene_id
 from core.shelf import Shelf
 from core.stairs import find_car, find_stairs
-from core.walls import can_see, fake_door_boxes, real_walls, wall_lines
+from core.walls import can_see, real_walls, wall_lines
 from core.weapons import find_goals, find_weapons, load_names
 
 SECTIONS = ("you", "inputs", "enemies", "items", "map", "near")
 TRIGGERS = ("death", "stuck", "key", "floor")
-parser = argparse.ArgumentParser(description="a text flight recorder of the game (only reads memory)")
-parser.add_argument("--what", default="you,inputs,enemies,items,map", help=f"parts to record: {','.join(SECTIONS)}")
-parser.add_argument("--near", type=float, metavar="RANGE", help="also every card (but walls) this close to you")
-parser.add_argument("--range", type=float, default=250, help="enemies this close to you (default 250)")
-parser.add_argument("--rate", type=float, default=30, help="samples per second (default 30)")
-parser.add_argument("--keep", type=float, default=10, help="seconds of history in a saved file (default 10)")
-parser.add_argument("--save-on", default="death,stuck,key,floor", help=f"when to save: {','.join(TRIGGERS)}")
-parser.add_argument("--events", action="store_true", help="only events + one line about you every second")
-parser.add_argument("--changes", action="store_true", help="a sample only when it's different from the last one")
-parser.add_argument("--bodies", action="store_true", help="bodies (cards matching a rule but dead) in samples too")
-parser.add_argument("--full", action="store_true", help="record everything into one file until Ctrl+C")
-parser.add_argument("--out", default="blackbox", help="folder for the files (default blackbox)")
+parser = argparse.ArgumentParser(
+    description="a text flight recorder of the game (only reads memory)"
+)
+parser.add_argument(
+    "--what",
+    default="you,inputs,enemies,items,map",
+    help=f"parts to record: {','.join(SECTIONS)}",
+)
+parser.add_argument(
+    "--near",
+    type=float,
+    metavar="RANGE",
+    help="also every card (but walls) this close to you",
+)
+parser.add_argument(
+    "--range", type=float, default=250, help="enemies this close to you (default 250)"
+)
+parser.add_argument(
+    "--rate", type=float, default=30, help="samples per second (default 30)"
+)
+parser.add_argument(
+    "--keep",
+    type=float,
+    default=10,
+    help="seconds of history in a saved file (default 10)",
+)
+parser.add_argument(
+    "--save-on",
+    default="death,stuck,key,floor",
+    help=f"when to save: {','.join(TRIGGERS)}",
+)
+parser.add_argument(
+    "--events",
+    action="store_true",
+    help="only events + one line about you every second",
+)
+parser.add_argument(
+    "--changes",
+    action="store_true",
+    help="a sample only when it's different from the last one",
+)
+parser.add_argument(
+    "--bodies",
+    action="store_true",
+    help="bodies (cards matching a rule but dead) in samples too",
+)
+parser.add_argument(
+    "--full", action="store_true", help="record everything into one file until Ctrl+C"
+)
+parser.add_argument(
+    "--out", default="blackbox", help="folder for the files (default blackbox)"
+)
 args = parser.parse_args()
 what = set(args.what.split(","))
 if args.near:
     what.add("near")
 save_on = set(args.save_on.split(","))
 if what - set(SECTIONS) or save_on - set(TRIGGERS):
-    parser.error(f"unknown part/trigger - parts: {','.join(SECTIONS)}  triggers: {','.join(TRIGGERS)}")
+    parser.error(
+        f"unknown part/trigger - parts: {','.join(SECTIONS)}  triggers: {','.join(TRIGGERS)}"
+    )
 
 SCAN_EVERY = 0.25  # seconds between the slow looks (enemy cards, items, near)
 MAP_EVERY = 2.0  # seconds between looks at the walls (they don't move)
@@ -78,14 +130,22 @@ WALKING = {"W", "A", "S", "D"}
 ME_LAYER, AIM_LAYER, WALL_LAYER = 0x2C, 0xAF, 0x9
 LOOK_NEAR = 8  # the look is this close to an enemy -> your character looks at him
 ITEM_NEAR = 60  # weapons appearing / disappearing this close to you are events (far ones are noise)
-STUCK_FOR, STUCK_MOVE = 1.5, 2  # holding walking keys and moving less than STUCK_MOVE in STUCK_FOR s = stuck
+STUCK_FOR, STUCK_MOVE = (
+    1.5,
+    2,
+)  # holding walking keys and moving less than STUCK_MOVE in STUCK_FOR s = stuck
 GONE_AFTER = 3.0  # hidden longer than this = not just sitting on an enemy
 # an execution (SPACE) hides you too - for 1.0 s with a weapon, 1.3 s with fists - and your old card even
 # looks dead meanwhile.
 # So only hidden LONGER than this can be a death
 DEATH_AFTER = 2.0
 SPACE_BEFORE = 0.5  # hidden this soon after SPACE = probably an execution
-AFTER = {"death": 1.0, "stuck": 0.5, "key": 0.0, "floor": 0.0}  # wait this long before saving (show the aftermath)
+AFTER = {
+    "death": 1.0,
+    "stuck": 0.5,
+    "key": 0.0,
+    "floor": 0.0,
+}  # wait this long before saving (show the aftermath)
 
 # the game's memory. Every sample takes a PHOTO of it (core/shelf.py) and reads only through the photo:
 # ~100 kernel reads a scan instead of ~19 000 - so the blackbox doesn't slow hmbot down any more
@@ -113,7 +173,9 @@ def header(why):
     return (
         f"# tools/blackbox.py - {why}\n"
         f"# {datetime.now():%Y-%m-%d %H:%M:%S}   parts: {','.join(sorted(what))}   rate {args.rate:g}/s"
-        f"   range {args.range:g}" + (f"   near {args.near:g}" if args.near else "") + "\n"
+        f"   range {args.range:g}"
+        + (f"   near {args.near:g}" if args.near else "")
+        + "\n"
         "# t = seconds (in a saved file: before the save)   !! = event\n\n"
     )
 
@@ -122,7 +184,9 @@ class Recorder:
     """Keeps the lines: a ring of the last --keep seconds, or (--full) straight into one file."""
 
     def __init__(self):
-        self.ring = deque()  # (time, text) - text can have more lines: the sample's details
+        self.ring = (
+            deque()
+        )  # (time, text) - text can have more lines: the sample's details
         self.file = None
         if args.full:
             self.file = open(self.new_name("full"), "w")
@@ -132,7 +196,9 @@ class Recorder:
         os.makedirs(args.out, exist_ok=True)
         name = os.path.join(args.out, f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{why}")
         path, n = name + ".txt", 2
-        while os.path.exists(path):  # two saves in the same second: don't write over the first one
+        while os.path.exists(
+            path
+        ):  # two saves in the same second: don't write over the first one
             path, n = f"{name}_{n}.txt", n + 1
         return path
 
@@ -143,7 +209,9 @@ class Recorder:
 
     def add(self, now, text):
         if self.file:
-            self.file.write("\n".join(self.lines(f"t={now - started:8.2f}s", text)) + "\n")
+            self.file.write(
+                "\n".join(self.lines(f"t={now - started:8.2f}s", text)) + "\n"
+            )
             return
         self.ring.append((now, text))
         while now - self.ring[0][0] > args.keep:
@@ -161,13 +229,17 @@ class Recorder:
             f.write(header(f"saved because: {why}"))
             for moment, text in self.ring:
                 f.write("\n".join(self.lines(f"t={moment - now:+7.2f}s", text)) + "\n")
-            f.write("\n# when it was saved:\n" + "".join(f"#   {line}\n" for line in state))
+            f.write(
+                "\n# when it was saved:\n" + "".join(f"#   {line}\n" for line in state)
+            )
         self.ring.clear()
         notify(f"saved {name}")
 
     def close(self, now, state):
         if self.file:
-            self.file.write("\n# at the end:\n" + "".join(f"#   {line}\n" for line in state))
+            self.file.write(
+                "\n# at the end:\n" + "".join(f"#   {line}\n" for line in state)
+            )
             self.file.close()
             notify(f"saved {self.file.name}")
         else:
@@ -184,7 +256,9 @@ def spot(xy):
 
 def read_look():
     try:
-        return read_double(mem, follow(mem, hands.LOOK_X)), read_double(mem, follow(mem, hands.LOOK_Y))
+        return read_double(mem, follow(mem, hands.LOOK_X)), read_double(
+            mem, follow(mem, hands.LOOK_Y)
+        )
     except OSError:
         return None
 
@@ -205,7 +279,9 @@ def read_inputs():
 
 
 def weapon_name(frame):
-    return "phantom" if frame == 0 else names.get(frame, {}).get("name", f"frame {frame}")
+    return (
+        "phantom" if frame == 0 else names.get(frame, {}).get("name", f"frame {frame}")
+    )
 
 
 def describe(card, you, look, lines, table):
@@ -236,7 +312,9 @@ alive = {}  # enemy card -> where he was, last sample
 hand = None
 you = last_you = None
 hidden_since, gone_told, dead_told = None, False, False
-dead_seen = False  # while hidden: your dead-looking card was there (an execution shows it too!)
+dead_seen = (
+    False  # while hidden: your dead-looking card was there (an execution shows it too!)
+)
 r_hidden = False  # while hidden: R was pressed (restart after a death)
 still_xy, still_since, stuck_told = None, 0, False
 f9_before = False
@@ -244,34 +322,62 @@ last_space = -math.inf  # when SPACE was held last
 pending = None  # (when, why) - a save waiting for its aftermath
 next_scan = next_map = next_beat = next_dead = 0
 last_sample = None  # --changes
-print(f"recording ({','.join(sorted(what))})... F9 in the game = save the last {args.keep:g} s, Ctrl+C = end")
+print(
+    f"recording ({','.join(sorted(what))})... F9 in the game = save the last {args.keep:g} s, Ctrl+C = end"
+)
 try:
     while True:
         now = time.monotonic()
         events = []
-        mem = Shelf(game)  # this sample's photo - every read below (and in the functions above) goes through it
+        mem = Shelf(
+            game
+        )  # this sample's photo - every read below (and in the functions above) goes through it
 
         # --- the slow looks ---
         try:
             if now >= next_scan:
                 records = mem.records
                 shelf = mem.cards
-                candidates = [c for c in shelf if any(matches(mem, c, *r) for r in rules)]
+                candidates = [
+                    c for c in shelf if any(matches(mem, c, *r) for r in rules)
+                ]
                 if "items" in what:
-                    stairs, car = find_stairs(mem, records), find_car(mem, records, shelf)
+                    stairs, car = (
+                        find_stairs(mem, records),
+                        find_car(mem, records, shelf),
+                    )
                     if stairs != items["stairs"]:
-                        events.append(f"GO! on the stairs at {spot(stairs)}" if stairs else "the stairs went off")
+                        events.append(
+                            f"GO! on the stairs at {spot(stairs)}"
+                            if stairs
+                            else "the stairs went off"
+                        )
                     if car != items["car"]:
-                        events.append(f"the car is READY at {spot(car)}" if car else "the car is not ready")
+                        events.append(
+                            f"the car is READY at {spot(car)}"
+                            if car
+                            else "the car is not ready"
+                        )
                     goals = {(round(x), round(y)) for x, y in find_goals(mem, shelf)}
-                    events += [f"a goal appeared at {spot(g)}" for g in goals - items["goals"]]
-                    events += [f"a goal is gone from {spot(g)} (taken?)" for g in items["goals"] - goals]
-                    weapons = {(round(x), round(y), frame) for x, y, frame in find_weapons(mem, shelf) if frame}
+                    events += [
+                        f"a goal appeared at {spot(g)}" for g in goals - items["goals"]
+                    ]
+                    events += [
+                        f"a goal is gone from {spot(g)} (taken?)"
+                        for g in items["goals"] - goals
+                    ]
+                    weapons = {
+                        (round(x), round(y), frame)
+                        for x, y, frame in find_weapons(mem, shelf)
+                        if frame
+                    }
                     if you is not None:
                         for x, y, frame in weapons ^ items["weapons"]:
                             if math.dist((x, y), you) < ITEM_NEAR:
                                 verb = "lies" if (x, y, frame) in weapons else "is gone"
-                                events.append(f"{weapon_name(frame)} {verb} at ({x},{y}) near you")
+                                events.append(
+                                    f"{weapon_name(frame)} {verb} at ({x},{y}) near you"
+                                )
                     items.update(stairs=stairs, car=car, goals=goals, weapons=weapons)
                 if "near" in what and you is not None:
                     near_text = []
@@ -279,7 +385,10 @@ try:
                         try:
                             xy = xy_of(card)
                             layer = read_kind(mem, card, 0, 0x14)
-                            if layer in (WALL_LAYER, ME_LAYER, AIM_LAYER) or math.dist(xy, you) > args.near:
+                            if (
+                                layer in (WALL_LAYER, ME_LAYER, AIM_LAYER)
+                                or math.dist(xy, you) > args.near
+                            ):
                                 continue
                             near_text.append(
                                 f"near {card:#x} {spot(xy)} far {math.dist(xy, you):3.0f}  layer {layer:#x}"
@@ -290,12 +399,18 @@ try:
                             continue
                 next_scan = now + SCAN_EVERY
             if now >= next_map:
-                walls = real_walls(mem, records, mem.cards) if records else []  # every wall ONCE: (xy, box) pairs
+                walls = (
+                    real_walls(mem, records, mem.cards) if records else []
+                )  # every wall ONCE: (xy, box) pairs
                 lines = wall_lines([xy for xy, box in walls])
                 if "map" in what and records:
-                    boxes = [box for xy, box in walls] + fake_door_boxes(mem, records)
+                    # the doors hmbot found never open on this floor (doors.json) - the same boxes the bot blocks
+                    fake = load_doors().get(scene_id(walls), [])
+                    boxes = [box for xy, box in walls] + [tuple(box) for box in fake]
                     if len(boxes) != items["map"]:
-                        events.append(f"map: {len(boxes)} boxes, {len(blocked_cells(boxes))} blocked cells")
+                        events.append(
+                            f"map: {len(boxes)} boxes, {len(blocked_cells(boxes))} blocked cells"
+                        )
                         items["map"] = len(boxes)
                 next_map = now + MAP_EVERY
             # table cards that aren't candidates yet: new ones AND ones that just started matching a rule
@@ -327,7 +442,9 @@ try:
                 if now - last_space < SPACE_BEFORE:
                     events.append("you're hidden right after SPACE - an execution?")
                 else:
-                    events.append("you're hidden (dead / loading / sitting on an enemy)")
+                    events.append(
+                        "you're hidden (dead / loading / sitting on an enemy)"
+                    )
             if "R" in held:
                 r_hidden = True
             if not dead_seen and last_you is not None and now >= next_dead:
@@ -335,20 +452,29 @@ try:
                 # your dead card: layer 0x2C with the death sign, where you were
                 for card in mem.cards if records else []:
                     try:
-                        if read_kind(mem, card, 0, 0x14) == ME_LAYER and read_u32(mem, card + 0xB4) == 1:
+                        if (
+                            read_kind(mem, card, 0, 0x14) == ME_LAYER
+                            and read_u32(mem, card + 0xB4) == 1
+                        ):
                             if math.dist(xy_of(card), last_you) < 40:
                                 dead_seen = True
                                 break
                     except OSError:
                         continue
             # an execution shows that card too - so a death only when it lasts too long, or R restarts the level
-            if dead_seen and not dead_told and (now - hidden_since > DEATH_AFTER or r_hidden):
+            if (
+                dead_seen
+                and not dead_told
+                and (now - hidden_since > DEATH_AFTER or r_hidden)
+            ):
                 events.append("YOU DIED" + (" (R pressed)" if r_hidden else ""))
                 dead_told = True
                 if "death" in save_on:
                     pending = (now + AFTER["death"], "death")
             if not gone_told and now - hidden_since > GONE_AFTER:
-                events.append(f"you're gone for {GONE_AFTER:g} s (menu / new floor / dead)")
+                events.append(
+                    f"you're gone for {GONE_AFTER:g} s (menu / new floor / dead)"
+                )
                 gone_told = True
         else:
             try:
@@ -360,7 +486,9 @@ try:
                 if hidden_since is not None:
                     gap = now - hidden_since
                     if last_you is not None and math.dist(you, last_you) > 100:
-                        events.append(f"you're back after {gap:.1f} s, {math.dist(you, last_you):.0f} away - new floor?")
+                        events.append(
+                            f"you're back after {gap:.1f} s, {math.dist(you, last_you):.0f} away - new floor?"
+                        )
                         if "floor" in save_on and not dead_told:
                             pending = (now, "floor")
                     else:
@@ -393,13 +521,17 @@ try:
                     if "enemies" in what and (args.bodies or line.startswith("ENEMY")):
                         details.append(line)
                 for card in now_alive.keys() - alive.keys():
-                    events.append(f"an enemy appeared: {card:#x} at {spot(now_alive[card])}")
+                    events.append(
+                        f"an enemy appeared: {card:#x} at {spot(now_alive[card])}"
+                    )
                 for card in alive.keys() - now_alive.keys():
                     try:
                         died = read_u32(mem, card + 0xB4) == 1
                     except OSError:
                         died = False
-                    events.append(f"enemy {card:#x} {'died' if died else 'is gone'} at {spot(alive[card])}")
+                    events.append(
+                        f"enemy {card:#x} {'died' if died else 'is gone'} at {spot(alive[card])}"
+                    )
                 alive = now_alive
                 if near_text:
                     details += near_text
@@ -411,7 +543,9 @@ try:
                     if still_xy is None or math.dist(you, still_xy) > STUCK_MOVE:
                         still_xy, still_since, stuck_told = you, now, False
                     elif now - still_since > STUCK_FOR and not stuck_told:
-                        events.append(f"STUCK at {spot(you)} holding {' '.join(sorted(held & WALKING))}")
+                        events.append(
+                            f"STUCK at {spot(you)} holding {' '.join(sorted(held & WALKING))}"
+                        )
                         stuck_told = True
                         if "stuck" in save_on:
                             pending = (now + AFTER["stuck"], "stuck")
@@ -430,11 +564,15 @@ try:
             if not args.events:
                 rec.add(now, sample)
             elif now >= next_beat:
-                rec.add(now, sample.split("\n")[0])  # --events: one line about you every second
+                rec.add(
+                    now, sample.split("\n")[0]
+                )  # --events: one line about you every second
                 next_beat = now + 1
         if pending is not None and now >= pending[0]:
             state = [
-                f"you {spot(last_you)}  hand {hand:#x}" if hand is not None else "you: -",
+                f"you {spot(last_you)}  hand {hand:#x}"
+                if hand is not None
+                else "you: -",
                 f"stairs {spot(items['stairs'])}   car {spot(items['car'])}   goals {len(items['goals'])}",
                 f"enemies alive {len(alive)}   map {items['map']} boxes",
             ]
@@ -442,4 +580,6 @@ try:
             pending = None
         time.sleep(max(0, 1 / args.rate - (time.monotonic() - now)))
 except KeyboardInterrupt:
-    rec.close(time.monotonic(), [f"you {spot(last_you)}", f"enemies alive {len(alive)}"])
+    rec.close(
+        time.monotonic(), [f"you {spot(last_you)}", f"enemies alive {len(alive)}"]
+    )

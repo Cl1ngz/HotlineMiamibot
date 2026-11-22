@@ -20,6 +20,14 @@ RECORD = 0xB8
 INSTANCE = 0x6D0  # bytes in the bigger object behind the record's first pointer
 AIM_PICTURE = 0xA5  # the crosshair's picture (folder +0x10) - always the same; its layer is NOT (0xAF, outside by the dumpster 0x1)
 
+# 64 cards around the table: a guess, big enough so far (helpers_for_me/far_cards.py checks it)
+AROUND = 64
+
+
+def shelf_range(cards):
+    """every card spot on the shelf: AROUND cards before the table's first card to AROUND after its last"""
+    return range(min(cards) - AROUND * RECORD, max(cards) + AROUND * RECORD + 1, RECORD)
+
 
 # where you were the last time find_me_card found you: picks the right card when several look like you
 me_last_xy = None
@@ -35,8 +43,7 @@ def find_me_card(mem):
     if not cards:
         return None
     found = {}
-    # 64 cards around the table: a guess, big enough so far (helpers_for_me/far_cards.py checks it)
-    for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
+    for card in shelf_range(cards):
         try:
             if (
                 read_kind(mem, card, 0, 0x14) == 0x2C
@@ -74,29 +81,19 @@ def find_me_card(mem):
     return me
 
 
-# My (x, y), or None
-def find_me(mem):
-    card = find_me_card(mem)
-    if card is None:
-        return None
-
-    # read X and Y from the card
-    return (read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF))
-
-
 # Crosshair card where it was last time checked
 aim_last_xy = {}
 # croshair card when last time moved
 aim_last_move = {}
 
 
-# card +0x14 = 0xAF  and  folder +0x10 = 0xA5
+# folder +0x10 = 0xA5
 def find_aim_card(mem):
     cards = table_records(mem)
     if not cards:
         return None
     aims = {}
-    for card in range(min(cards) - 64 * RECORD, max(cards) + 64 * RECORD + 1, RECORD):
+    for card in shelf_range(cards):
         try:
             # the crosshair: known by its picture - its layer changes from floor to floor
             if read_kind(mem, card, 1, 0x10) == AIM_PICTURE:
@@ -221,9 +218,7 @@ def shelf_cards(mem, records):
     if not records:
         return []
     cards = []
-    for card in range(
-        min(records) - 64 * RECORD, max(records) + 64 * RECORD + 1, RECORD
-    ):
+    for card in shelf_range(records):
         try:
             x, y = read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF)
         except OSError:

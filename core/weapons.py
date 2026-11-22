@@ -1,14 +1,10 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
-# weapons.py - weapons lying on the floor
-#
-# A weapon on the floor = a card on the floor layer (-100) with picture 0x15.
-# The frame number at card +0x98 says which weapon it is (names: weapon_names.json, made by tools/weapon_tool.py).
-# A goal (the briefcase...) = a card on the floor layer with its own picture (GOAL).
+# core/weapons.py - weapons and goals (the briefcase) lying on the floor, and which weapon to go for
+# floor layer -100 + picture 0x15 = weapon, its frame at +0x98 = which one (weapon_names.json, tools/weapon_tool.py)
 import json
 import math
 
-from .enemies import shelf_cards
-from .memory import X_OFF, Y_OFF, read_double, read_kind, table_records
+from .memory import X_OFF, Y_OFF, read_double, read_kind
 from .walls import can_see
 
 # layer -100: things lying on the floor
@@ -31,10 +27,8 @@ def load_names():
         return {}
 
 
-def find_weapons(mem, cards=None):
+def find_weapons(mem, cards):
     """[(x, y, frame), ...] for every weapon lying on the floor."""
-    if cards is None:
-        cards = shelf_cards(mem, table_records(mem))
     found = []
     for card in cards:
         try:
@@ -52,10 +46,8 @@ def find_weapons(mem, cards=None):
     return found
 
 
-def find_goals(mem, cards=None):
+def find_goals(mem, cards):
     """[(x, y), ...] for every goal (the briefcase...) lying on the floor."""
-    if cards is None:
-        cards = shelf_cards(mem, table_records(mem))
     found = []
     for card in cards:
         try:

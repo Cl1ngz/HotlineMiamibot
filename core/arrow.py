@@ -1,43 +1,26 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
-# core/arrow.py - the red arrow: where it is and what it points at (helpers_for_me/arrow_bob + arrow_live)
-#
-# The game doesn't keep "the arrow points at X" anywhere - it just DRAWS the arrow every frame. To draw, it writes
-# a list of corners for the graphics card, 36 bytes = 9 floats per corner:
-#     x, y, z, u, v, r, g, b, a          (y is stored NEGATIVE: -113 means 113 down)
-# u, v = where the little picture sits in the big picture sheet. The arrow is always the same 16x16 picture,
-# but in different scenes it sits in a different place of the sheet - so PAIRS lists every place we found it in.
-# An arrow = 4 corners in a row with the u's left, left, right, right - a 16x16 square, turned any way
-# (over the TV it points down, at the dumpster up). The thing it points at is BELOW px further along its tip.
-# The lists can still hold OLD arrows from earlier frames - a live arrow bobs, an old one never moves.
+# core/arrow.py - the red arrow: the game only draws it, so we look for its 4 corners in the drawing lists
+# old arrows stay in memory and never move, the live one bobs - update() gives what the live one points at
 import math
 import os
 
 import numpy as np
 
-# the arrow's u's (left side, right side) as 4-byte numbers - one pair for every place in the picture sheet
-# we found it in (helpers_for_me/arrow_bob)
+# u = where the arrow's picture sits in the big picture sheet (a float kept as a 4-byte number).
+# It's in a different place in different scenes - one (left u, right u) pair per place found (helpers_for_me/arrow_bob)
 PAIRS = [
-    (
-        0x3DD80000,
-        0x3DE80000,
-    ),  # 0.10546875 / 0.11328125 - the apartment (the TV, the round thing)
-    (
-        0x3CB00000,
-        0x3CF00000,
-    ),  # 0.021484375 / 0.029296875 - the metro, outside (the dumpster)
+    (0x3DD80000, 0x3DE80000),  # the apartment (the TV, the round thing)
+    (0x3CB00000, 0x3CF00000),  # the metro, outside (the dumpster)
 ]
-CORNER = 9  # floats per corner
-SIZE = 16  # the arrow is 16x16
-BELOW = 27  # what it points at is this far from its middle, along the tip
-BOB = 10  # a live arrow moves at most this much between two looks (any direction)
-BLOCK = 1 << 20  # once found, the 1 MB block around it is watched
-CHUNK = (
-    4 << 20
-)  # the search through the whole memory: this much per frame (it never stops the bot for long)
-LOOK_EVERY = (
-    0.1  # seconds between two looks at the known blocks (the bob needs a moment)
-)
-GONE_AFTER = 0.6  # no live arrow for this long = there's no arrow
+# one corner in a drawing list: 9 floats - x, y, z, u, v, r, g, b, a (y is stored minus: -113 = 113 down)
+CORNER = 9
+SIZE = 16  # the arrow is a 16x16 square
+BELOW = 27  # the thing it points at is this far from its middle, toward the tip
+BOB = 10  # a live arrow moves at most this much between two looks
+BLOCK = 1 << 20  # found an arrow -> watch the 1 MB around it
+CHUNK = 4 << 20  # searching all memory: 4 MB a frame, so the bot never stops for long
+LOOK_EVERY = 0.1  # seconds between looks at the known blocks (the bob needs a moment)
+GONE_AFTER = 0.6  # no live arrow this long = no arrow
 
 
 def read_words(mem, at, size):
@@ -50,25 +33,22 @@ def read_words(mem, at, size):
 
 
 def arrows(words, base):
-    """Every arrow in these 4-byte numbers (they start at address `base`).
-    -> [(address, x, y of its middle, tip_x, tip_y)]   tip = which way it points (a step of length 1)
-    The arrow can be turned (over the TV it points down, at the dumpster up): so no "left side = smaller x" -
-    just 4 corners that make a 16x16 square, in any direction."""
-    floats = words.view("<f4")  # the same bytes, read as floats
+    """Every arrow in these words (they start at address `base`) -> [(address, x, y, tip_x, tip_y)]
+    x, y = its middle, tip = which way it points (length 1). Turned any way: over the TV down, at the dumpster up."""
+    floats = words.view("<f4")  # the same bytes as floats
     found = []
     for left, right in PAIRS:
-        hits = np.nonzero(words == left)[0]  # every u of a left corner
-        hits = hits[
-            (hits >= 3) & (hits + 3 * CORNER + 2 < len(words))
-        ]  # (room for the whole arrow around it)
-        # the next corners: left again, then right, right
+        # every left u, with room for the whole arrow around it
+        hits = np.nonzero(words == left)[0]
+        hits = hits[(hits >= 3) & (hits + 3 * CORNER + 2 < len(words))]
+        # the next 3 corners must be: left, right, right
         pattern = (
             (words[hits + CORNER] == left)
             & (words[hits + 2 * CORNER] == right)
             & (words[hits + 3 * CORNER] == right)
         )
         for h in hits[pattern].tolist():
-            # a corner = x, y, z, u, v... and it starts 3 floats before its u. y is stored NEGATIVE -> turn it around
+            # a corner starts 3 floats before its u; y is stored minus -> flip it
             corners = []
             for k in range(4):
                 at = h - 3 + k * CORNER
@@ -78,7 +58,7 @@ def arrows(words, base):
             if not all(math.isfinite(n) for corner in corners for n in corner):
                 continue
             (x0, y0, v0), (x1, y1, v1), (x2, y2, v2), (x3, y3, v3) = corners
-            # a real 16x16 square: every side SIZE long (left 0-1, top/bottom 0-2 and 1-3, right 2-3)
+            # a real 16x16 square: all 4 sides 16 long
             sides = (
                 math.dist((x0, y0), (x1, y1)),
                 math.dist((x0, y0), (x2, y2)),
@@ -87,9 +67,9 @@ def arrows(words, base):
             )
             if not all(abs(side - SIZE) < 1 for side in sides):
                 continue
-            # the middle = halfway between all 4 corners
+            # the middle = the average of the 4 corners
             x, y = (x0 + x1 + x2 + x3) / 4, (y0 + y1 + y2 + y3) / 4
-            # the tip = the edge with the smaller v (over the TV: v 0.449 at the bottom, 0.457 at the top)
+            # the tip = the side with the smaller v (over the TV: 0.449 at the bottom, so it points down)
             low = min(v0, v1)
             tip = [(cx, cy) for cx, cy, v in corners if v == low]
             tx = sum(cx for cx, cy in tip) / len(tip) - x
@@ -102,12 +82,12 @@ def arrows(words, base):
 
 
 class ArrowWatch:
-    """Finds the red arrow and follows it - a little work every frame, so it never stops the bot for long.
+    """Finds the red arrow and follows it, a little work every frame.
     watch = ArrowWatch(mem, regions) once, then watch.update(now) every frame."""
 
     def __init__(self, mem, regions):
         self.mem = mem
-        # the whole memory in CHUNK pieces - the search goes through them one per frame
+        # all memory cut into CHUNK pieces - one is searched per frame
         self.pieces = [
             (at, min(CHUNK, end - at))
             for start, end in regions
@@ -115,19 +95,15 @@ class ArrowWatch:
         ]
         self.next_piece = 0
         self.blocks = set()  # the 1 MB blocks where an arrow was ever found
-        self.last = {}  # {address: (x, y, tip_x, tip_y)} of the arrows in the last look
+        self.last = {}  # {address: (x, y, tip_x, tip_y)} from the last look
         self.last_at = -math.inf  # when that look was
         self.seen_live = -math.inf  # when a live arrow was seen last
         self.xy = None  # the live arrow's middle
-        self.tip = (
-            0,
-            1,
-        )  # which way the live arrow points (a step of length 1; (0, 1) = down)
+        self.tip = (0, 1)  # which way it points, (0, 1) = down
 
     def search_all(self):
-        """The whole memory at once (~0.5 s). Once at the start: the bot must know where the lists are
-        BEFORE it walks anywhere - a piece per frame needs over a second to get through it all.
-        """
+        """All memory at once (~0.5 s), at the start: the bot has to know where the lists are before it walks -
+        a piece per frame takes over a second to go through it all."""
         for at, size in self.pieces:
             for address, *_ in arrows(read_words(self.mem, at, size), at):
                 self.blocks.add(address - address % BLOCK)
@@ -142,8 +118,8 @@ class ArrowWatch:
                 ):
                     found[address] = (x, y, tx, ty)
             for address, (x, y, tx, ty) in found.items():
-                # live = not exactly the same as in the last look, AND in the last look there was an arrow a
-                # LITTLE away from this one (it bobbed - a turned arrow bobs sideways, so: the distance)
+                # live = changed since the last look, and the last look had an arrow a little away from it
+                # (it bobbed; a turned arrow bobs sideways, so: the distance)
                 if self.last.get(address) != (x, y, tx, ty) and any(
                     0 < math.dist((x, y), (lx, ly)) <= BOB
                     for lx, ly, _, _ in self.last.values()
@@ -154,7 +130,7 @@ class ArrowWatch:
             self.last, self.last_at = found, now
         if now - self.seen_live > GONE_AFTER:
             self.xy = None
-            # no live arrow in the known blocks: search one more piece of the whole memory for new ones
+            # no live arrow in the known blocks: search the next piece of memory for new ones
             at, size = self.pieces[self.next_piece]
             for address, *_ in arrows(read_words(self.mem, at, size), at):
                 self.blocks.add(address - address % BLOCK)
