@@ -10,29 +10,27 @@ from . import game
 from .boxes import Plan
 from .config import EMPTY_HANDS, GRAB_REACH, REACH
 
-# so walk up this close to a lying enemy - closer than EXECUTE_REACH, or you stop right at the edge
-EXECUTE_WALK = 16
-# how fast an enemy runs
-ENEMY_SPEED = 180
-# back off this far at a time - less than STRAIGHT, so the legs walk straight there
-BACK_STEP = 24
-# an enemy running at you faster than this (his own steps, px/s) is CHARGING: don't run into him - meet him
-# standing (he runs ~180; running into him doubles the speed you meet at, and in the logs he always hit first)
+EXECUTE_WALK = 16  # walk this close to a lying enemy - inside act.py's EXECUTE_REACH (30), not at its edge
+ENEMY_SPEED = 180  # how fast an enemy runs
+BACK_STEP = 24  # back off this far at a time - less than walk.py's STRAIGHT, so the legs go straight there
+# an enemy running at you faster than this, this close: he's CHARGING - meet him standing
+# (running into him doubles the speed you meet at, and in the logs he always hit first)
 CHARGE_SPEED = 60
-# ...when he's this close (further away: walk on, he may still turn)
 MEET_FAR = 150
-# backing off: a step only where there's this much free room (no wall, no sofa) - never back into a wall
-BACK_ROOM = 48
-# the red arrow: walk this close to what it points at...
+BACK_ROOM = (
+    48  # backing off: only where there's this much free room (never back into a wall)
+)
+# walk this close to what the red arrow points at / to a spot shown with tools/scene_tool.py (then tap LMB)
 ARROW_WALK = 8
-# a spot shown with tools/scene_tool.py: walk this close to it (then stand there and tap LMB - the talk goes on)
 SPOT_WALK = 8
 
 
+# ↖  ↑ ↗
+# ← you →  8 directions, steps 24
+# ↙  ↓  ↘
 def back_off_point(you, threats, blocked, lines):
-    """Where to step back to while the weapon gets ready - or None: no room (a wall or a corner behind you).
-    Of 8 directions, the one with BACK_ROOM free room that leaves you furthest from the closest enemy:
-    straight back when there's room, along the wall when there isn't."""
+    """Where to step back while the weapon gets ready, or None (a wall or a corner behind you).
+    Of 8 directions with BACK_ROOM free: the one that leaves you furthest from the closest enemy."""
     closest_now = min(math.dist(you, xy) for xy in threats)
     best, best_far = None, closest_now
     for i in range(8):
@@ -44,8 +42,7 @@ def back_off_point(you, threats, blocked, lines):
             or cell_of(room) in blocked
             or not can_see(you, room, lines)
         ):
-            # a wall there - no room to step back
-            continue
+            continue  # a wall there
         far = min(
             math.dist(step, xy) for xy in threats
         )  # the closest enemy after the step
@@ -56,11 +53,9 @@ def back_off_point(you, threats, blocked, lines):
 
 
 def decide(eyes, hands, now):
-    """What we want this frame -> a Plan. Only looks at eyes (and in hands, when the weapon is ready),
-    never at the game.
-    First come first served: a weapon (empty hands) or the level goal (floor clear),
-    then the enemy you see, then an enemy behind a wall, then the car, then the stairs.
-    """
+    """What we want this frame -> a Plan. Looks at eyes (and hands: when the weapon is ready), never at the game.
+    The first that fits wins: a weapon (empty hands) or the level goal (floor clear), the enemy you see,
+    an enemy behind a wall, the red arrow, the car, the stairs, a shown spot."""
     you = eyes.you
     target_xy = eyes.spots.get(eyes.target)
     enemy_far = math.dist(target_xy, you) if target_xy is not None else math.inf
@@ -70,7 +65,7 @@ def decide(eyes, hands, now):
     if eyes.hand in EMPTY_HANDS:
         grab = choose_weapon(eyes.weapons, you, enemy_far, eyes.lines)
     if grab is None and eyes.goals and not eyes.still:
-        # the floor is clear: take the level's goal, wherever it lies - the right button swaps it for the weapon
+        # floor clear: take the level's goal wherever it lies (the right button swaps it for the weapon)
         grab = min(eyes.goals, key=lambda xy: math.dist(xy, you))
     if grab is not None:
         return Plan(
@@ -82,9 +77,8 @@ def decide(eyes, hands, now):
 
     if target_xy is not None:
         if eyes.behind_door and not eyes.lying:
-            # a closed door between you: a swing only hits the door (then the weapon isn't ready, you back off,
-            # come back, hit the door again...) - walk INTO the door: it swings open, and knocks him down
-            # if he stands right behind it
+            # a closed door between you: a swing only hits the door - walk INTO it, it swings open
+            # and knocks him down if he stands right behind it
             return Plan(
                 goal=target_xy,
                 close_enough=0,
@@ -104,7 +98,7 @@ def decide(eyes, hands, now):
                     close_enough=0,
                     text=f"BACKING OFF {enemy_far:3.0f} away, ready in {time_left:.2f} s",
                 )
-            # no room behind you: running into the wall is the end - stand, the swing comes the moment it's ready
+            # no room behind you: stand, the swing comes the moment the weapon is ready
             return Plan(
                 text=f"CORNERED {enemy_far:3.0f} away, ready in {time_left:.2f} s - standing"
             )

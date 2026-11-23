@@ -46,17 +46,15 @@ def pause(err, eyes, hands, legs, now):
         status("MOUNTED - hitting")
         time.sleep(1 / FPS)  # not 0.2 s like a pause - every frame counts here
     else:
-        # a new floor, the menu, the score screen, a title card, or you sit on an enemy: forget the old floor
+        # a new floor, the menu, the score screen, a title card: forget the old floor, read the new one at once
         lockon.reset()
         eyes.stairs = None
         eyes.car = None
-        # new thing forget old
         legs.learned.clear()
-        # look at the new floor and new walls
         eyes.next_scan = 0
         eyes.next_walls = 0
         status(f"{err} (paused)")
-        # the score screen / a title card: no player, nothing else to do - tap through it
+        # the score screen / a title card: tap through it
         idle_tap(hands, now)
         time.sleep(0.2)
     legs.held = hold(game.mem, game.mem_rw, set(), legs.held)
@@ -73,8 +71,7 @@ def wait_frame(eyes, now):
             except OSError:
                 # can't write right now - stop for this frame, the next one tries again
                 aim = False
-        # don't burn CPU while waiting for the next frame
-        time.sleep(0.002)
+        time.sleep(0.002)  # don't burn the CPU while waiting
 
 
 # --- start ---
@@ -86,9 +83,8 @@ faulthandler.register(signal.SIGUSR1, file=stuck_file)
 stop_at = time.monotonic() + float(sys.argv[1]) if len(sys.argv) > 1 else math.inf
 
 eyes, hands, legs = Eyes(), Hands(), Legs()
-slowest = 0
-# when to tell the radar again
-next_share = 0
+slowest = 0  # the slowest loop in ms, printed at the end
+next_share = 0  # when to tell the radar again
 try:
     game.get_ready()
     while time.monotonic() < stop_at:
@@ -101,8 +97,7 @@ try:
             if now >= next_share:
                 share(Plan(text=f"{err} (paused)"), eyes, legs)
                 next_share = now + SHARE_EVERY
-            # only the loop can skip the rest of the frame - see() can't
-            continue
+            continue  # skip the rest of the frame (only the loop can, see() can't)
         plan = decide(eyes, hands, now)
         try:
             act(plan, eyes, hands, now)
@@ -118,8 +113,7 @@ try:
             share(plan, eyes, legs)
             next_share = now + SHARE_EVERY
 
-        # ms spent on see + decide + act + walk in this loop
-        work = (time.monotonic() - now) * 1000
+        work = (time.monotonic() - now) * 1000  # ms for see + decide + act + walk
         slowest = max(slowest, work)
         if work > 1000 / FPS:
             print(f"\nslow loop: {work:.1f} ms")
@@ -127,6 +121,7 @@ try:
 except KeyboardInterrupt:
     pass
 finally:
+    # let go of everything, or a key stays held in the game after the bot stops
     print("\nbye!")
     release_left(game.mem, game.mem_rw)
     release_right(game.mem, game.mem_rw)

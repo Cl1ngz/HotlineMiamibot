@@ -16,10 +16,11 @@ from core.hands import (
 from . import game
 from .config import EMPTY_HANDS, GRAB_REACH, MOVED_A_BIT, REACH
 
-# seconds to hold a button (SPACE, the right button, and the left one while sitting on an enemy)
-HOLD = 0.15
-# seconds between two SPACE presses / two clicks while sitting on an enemy
-COOLDOWN = 0.25
+HOLD = 0.15  # seconds a plain click / the right button is held
+COOLDOWN = (
+    0.25  # seconds between two plain clicks (also hitting while you sit on an enemy)
+)
+# seconds until the weapon swings again, by your hand at rest (card +0xA0)
 READY = {
     0x1: 0.35,  # fists
     0x13: 0.45,  # Baseball Bat
@@ -28,47 +29,37 @@ READY = {
     0xF: 0.40,  # lead pipe
     0x16C: 0.35,  # the briefcase (one swing 0.27 s)
 }
-# unknow weapon not measured yet = slowest one
-READY_UNKNOWN = 0.45
-# hold left button this amount if no swing then let go anyway dialog or smt
-SWING_WAIT = 0.6
-# after holding LMB with no swing: keep it UP this long, so the game sees the next press as a new one
-RELEASE_GAP = 0.15
-# SPACE works only when you stand  ON him: the game took it at 28-32
-EXECUTE_REACH = 30
-# after space u sit on him game hides your card and u finish him with the left button: 2 seconds is enough
-MOUNTED_FOR = 2.0
-# press x seconds early agains charging enemy (press -> hit takes ~1 frame 0.03-0.04s)
-SWING_LEAD = 0.04
-# a door between you and the enemy: through a CLOSED door he's never closer than ~32 (the log: 32-34), so
-# closer than this the door must be open already (eyes.doors is read only every WALLS_EVERY) - swing then
+READY_UNKNOWN = 0.45  # a weapon not measured yet = the slowest one
+SWING_WAIT = 0.6  # hold LMB this long at most for a swing - none came (a dialogue?): let go anyway
+RELEASE_GAP = (
+    0.15  # then keep it UP this long, so the game sees the next press as a new one
+)
+EXECUTE_REACH = 30  # SPACE works only when you stand ON him (the game took it at 28-32)
+MOUNTED_FOR = 2.0  # after SPACE you sit on him, your card is hidden, LMB finishes him - 2 s is enough
+SWING_LEAD = (
+    0.04  # press this early against a charging enemy (press -> hit takes ~1 frame)
+)
+# a door between you: through a CLOSED one he's never closer than ~32, so closer than this it's open - swing
 DOOR_SWING = 30
-# nothing to do this long (a dialogue, the score screen, a title card): tap the left button to go on
+# nothing to do this long (a dialogue, the score screen, a title card): tap LMB every IDLE_CLICK_EVERY
 IDLE_CLICK_AFTER = 1.5
-# one tap every this many seconds
 IDLE_CLICK_EVERY = 0.5
-# after a right click wait this long: +0xA0 changes a moment later, and a 2nd click would THROW the weapon
-GRAB_COOLDOWN = 0.5
-# the game executes on the PRESS of SPACE, not while it's held (tested by hand) - so short taps, often:
-# the moment the enemy can be finished (~0.4 s after he falls), a tap comes within EXEC_EVERY
+GRAB_COOLDOWN = 0.5  # after a right click: +0xA0 changes a moment later, and a 2nd click would THROW the weapon
+# the game executes on the PRESS of SPACE, not while held - so short taps, often (the enemy can be
+# finished ~0.4 s after he falls, a tap comes within EXEC_EVERY)
 EXEC_TAP = 0.05
 EXEC_EVERY = 0.1
-# ...and from this close tap LMB on it (the TV stops you ~20 away from its middle)
+# using a thing (the arrow): tap LMB from this close (the TV stops you ~20 from its middle), this often
 USE_REACH = 24
-# seconds between two LMB taps while using something (also clicks the text away)
 USE_EVERY = 0.3
-# empty hands: this many LMB taps did nothing -> try the right button (a thing to TAKE)
-USE_LEFT = 3
-# the goal moved this far: a new thing to use (the arrow bobs ~3, a new thing is much further)
-NEW_USE = 20
-# you want to walk but haven't moved more than MOVED_A_BIT for this long: a dialogue holds you - click it away
-STUCK_TAP_AFTER = 0.5
+USE_LEFT = 3  # empty hands and this many LMB taps did nothing -> try the right button (a thing to TAKE)
+NEW_USE = 20  # the goal moved this far: a new thing to use (the arrow bobs ~3)
+STUCK_TAP_AFTER = 0.5  # you want to walk but nothing moved this long: a dialogue holds you - click it away
 
 
 def click(hands, now):
-    """A plain left click: press it now - let_go() lets go of it after HOLD.
-    For sitting on an enemy (pause): your card is hidden then, so there's no hand to watch.
-    """
+    """A plain left click: press now, let_go() lets go after HOLD.
+    Also for sitting on an enemy (pause): your card is hidden then, so there's no hand to watch."""
     press_left(game.mem, game.mem_rw)
     hands.release_at = now + HOLD
     hands.next_swing = now + COOLDOWN
@@ -88,8 +79,8 @@ def idle_tap(hands, now):
 
 
 def start_swing(hands, eyes, now):
-    """Press the left button and HOLD it until the swing starts (swing_started() sees your hand change).
-    The game swings the moment the weapon is ready - if the button is down then."""
+    """Press LMB and hold it until the swing starts (swing_started() sees your hand change):
+    the game swings the moment the weapon is ready - if the button is down then."""
     press_left(game.mem, game.mem_rw)
     hands.rest_hand = eyes.hand
     hands.release_at = now + SWING_WAIT
@@ -111,7 +102,7 @@ def let_go(hands, now):
         release_left(game.mem, game.mem_rw)
         hands.release_at = None
         if hands.rest_hand is not None:
-            # we held it for a swing that never came: stay up a moment, so the next press is a NEW press
+            # held for a swing that never came: stay up a moment, so the next press is a NEW one
             hands.next_swing = now + RELEASE_GAP
         hands.rest_hand = None
     if hands.space_up_at is not None and now >= hands.space_up_at:
@@ -130,16 +121,14 @@ def act(plan, eyes, hands, now):
         look_at(game.mem, game.mem_rw, xy)
         far = math.dist(xy, eyes.you)
         if eyes.lying:
-            # on the floor: stand on him and press SPACE (like a click: hold a moment, then let go)
+            # on the floor: stand on him and tap SPACE (down now, up after EXEC_TAP, again after EXEC_EVERY)
             if (
                 far < EXECUTE_REACH
                 and hands.space_up_at is None
                 and now >= hands.next_swing
             ):
                 key_down(game.mem, game.mem_rw, KEY_SPACE)
-                # let go of SPACE after 0.05 s
                 hands.space_up_at = now + EXEC_TAP
-                # the next tap after 0.1 s
                 hands.next_swing = now + EXEC_EVERY
                 hands.mounted_until = now + MOUNTED_FOR
         elif (
@@ -173,7 +162,7 @@ def act(plan, eyes, hands, now):
             and now >= hands.next_swing
         ):
             if eyes.hand in EMPTY_HANDS and hands.use_taps >= USE_LEFT:
-                # empty hands and LMB did nothing USE_LEFT times: maybe it's to be TAKEN (the shop) - the right button
+                # LMB did nothing USE_LEFT times: maybe it's to be TAKEN (the shop) - the right button
                 press_right(game.mem, game.mem_rw)
                 hands.right_up_at = now + HOLD
             else:
@@ -183,9 +172,8 @@ def act(plan, eyes, hands, now):
             hands.next_swing = now + USE_EVERY
     else:
         hands.use_goal = None
-    # a dialogue stops the whole game (the text after the TV, the round thing, a talk in a level...):
-    # you want to walk, but neither you nor any enemy you see moves -> click the text away.
-    # (stuck at a wall in a fight is different: you stand, but the enemies keep coming)
+    # a dialogue stops the whole game: you want to walk, but neither you nor any enemy you see moves
+    # -> click the text away (stuck at a wall in a fight is different: the enemies keep coming)
     wants_to_walk = (
         plan.goal is not None and math.dist(plan.goal, eyes.you) > plan.close_enough
     )
@@ -208,7 +196,7 @@ def act(plan, eyes, hands, now):
         # everything has stood still for a while: a dialogue - click it on
         click(hands, now)
         hands.next_swing = now + USE_EVERY
-    # nothing to do (no goal, or already standing at it) and no enemy: a dialogue, the score screen - tap LMB
+    # nothing to do and no enemy: a dialogue, the score screen - tap LMB now and then
     if (plan.goal is None or not wants_to_walk) and eyes.target is None:
         idle_tap(hands, now)
     else:

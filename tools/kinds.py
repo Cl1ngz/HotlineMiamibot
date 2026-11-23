@@ -1,5 +1,5 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
-# kinds.py - list every kind of object on the floor (using the kind number of the first enemy rule)
+# tools/kinds.py - list every kind of object on the floor (using the kind number of the first enemy rule)
 # get a table of every kind of object
 import time
 from collections import defaultdict
@@ -9,7 +9,7 @@ from core.memory import attach, read_kind, table_records, wait
 
 rules = load_rules()
 if not rules:
-    raise SystemExit("no enemy rules yet - run python obj_kinds.py first")
+    raise SystemExit("no enemy rules yet - run python -m tools.enemy_tool look first")
 where, offset, _ = rules[0]  # the spot where the first rule found the kind number
 
 mem, regions, static_regions = attach()
@@ -59,5 +59,5 @@ runners = [
 ]
 if runners:
     print(
-        f"\n{len(runners)} things move by themselves but aren't enemies yet - dogs? run:  python obj_kinds.py dogs"
+        f"\n{len(runners)} things move by themselves but aren't enemies yet - dogs? aim at one:  python -m tools.enemy_tool look"
     )

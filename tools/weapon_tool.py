@@ -13,17 +13,9 @@ import json
 import math
 import sys
 
-from core.enemies import RECORD, find_aim, find_me_card
-from core.memory import (
-    X_OFF,
-    Y_OFF,
-    attach,
-    read_double,
-    read_kind,
-    table_records,
-    wait,
-)
-from core.weapons import FLOOR, FRAME, MARK, NAMES_FILE, load_names
+from core.enemies import find_aim, find_me_card, shelf_cards
+from core.memory import X_OFF, Y_OFF, attach, read_double, table_records, wait
+from core.weapons import NAMES_FILE, find_weapons, load_names
 
 CLOSE = 20  # the weapon must be this close to the crosshair
 KINDS = ("melee", "gun", "throw")
@@ -46,23 +38,8 @@ def show_known():
 
 
 def floor_weapons(mem):
-    """{card: (x, y, frame)} of every weapon lying on the floor (the whole shelf - weapons are often not in the table)."""
-    table = table_records(mem)
-    if not table:
-        return {}
-    found = {}
-    for card in range(min(table) - 64 * RECORD, max(table) + 64 * RECORD + 1, RECORD):
-        try:
-            if (
-                read_kind(mem, card, 0, 0x14) != FLOOR
-                or read_kind(mem, card, 1, 0x10) != MARK
-            ):
-                continue
-            x, y = read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF)
-            found[card] = (x, y, int(read_double(mem, card + FRAME)))
-        except OSError:
-            continue  # junk memory past the ends of the shelf
-    return found
+    """[(x, y, frame), ...] of every weapon lying on the floor (the whole shelf - weapons are often not in the table)."""
+    return find_weapons(mem, shelf_cards(mem, table_records(mem)))
 
 
 # --- forget N: no game needed ---

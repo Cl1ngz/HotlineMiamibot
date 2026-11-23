@@ -29,6 +29,7 @@ from core.enemies import (
     load_rules,
     save_dead_checks,
     save_rules,
+    shelf_range,
 )
 from core.hands import LOOK_X, LOOK_Y, follow
 from core.memory import (
@@ -172,8 +173,15 @@ what = (
 wait(f"aim at {what} and keep the crosshair on it", 3)
 aim = find_aim(mem)
 if aim is None:
-    # no crosshair card on this floor (outside, by the dumpster): the game's own "where the mouse is" is the same point
-    aim = (read_double(mem, follow(mem, LOOK_X)), read_double(mem, follow(mem, LOOK_Y)))
+    # no crosshair card on this floor (outside, by the dumpster): the game's own "where the mouse is"
+    # (the default look chain - in another launch it can be the wrong one)
+    try:
+        aim = (
+            read_double(mem, follow(mem, LOOK_X)),
+            read_double(mem, follow(mem, LOOK_Y)),
+        )
+    except OSError:
+        aim = None
 me = find_me_card(mem)
 table = table_records(mem)
 if aim is None or not table:
@@ -184,7 +192,7 @@ wall_layer = Counter(read_kind(mem, card, 0, 0x14) for card in table).most_commo
 
 # every card on the shelf at a real position (the table misses some live ones - you, enemies that come later)
 cards = {}
-for card in range(min(table) - 64 * RECORD, max(table) + 64 * RECORD + 1, RECORD):
+for card in shelf_range(table):
     try:
         xy = read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF)
     except OSError:
