@@ -24,9 +24,9 @@ AIM_PICTURE = 0xA5  # the crosshair's picture (folder +0x10) - always the same; 
 AROUND = 64
 
 
-def shelf_range(cards):
-    """every card spot on the shelf: AROUND cards before the table's first card to AROUND after its last"""
-    return range(min(cards) - AROUND * RECORD, max(cards) + AROUND * RECORD + 1, RECORD)
+def shelf_range(cards, around=AROUND):
+    """every card spot on the shelf: `around` cards before the table's first card to `around` after its last"""
+    return range(min(cards) - around * RECORD, max(cards) + around * RECORD + 1, RECORD)
 
 
 # where you were the last time find_me_card found you: picks the right card when several look like you
@@ -213,12 +213,12 @@ def copy_memory(mem, records):
     return copies
 
 
-def shelf_cards(mem, records):
+def shelf_cards(mem, records, around=AROUND):
     """Cards on the shelf around the table's cards (also NOT in the table) that stand at a real position."""
     if not records:
         return []
     cards = []
-    for card in shelf_range(records):
+    for card in shelf_range(records, around):
         try:
             x, y = read_double(mem, card + X_OFF), read_double(mem, card + Y_OFF)
         except OSError:

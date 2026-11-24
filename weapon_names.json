@@ -1,18 +1,6 @@
 {
-  "2": {
-    "name": "Golf Club",
-    "kind": "melee"
-  },
-  "3": {
-    "name": "Lead Pipe",
-    "kind": "melee"
-  },
-  "4": {
-    "name": "Baseball Bat",
-    "kind": "melee"
-  },
-  "5": {
-    "name": "Knife",
-    "kind": "melee"
-  }
+  "2": { "name": "Golf Club", "kind": "melee", "hand": "0x16", "rank": 3 },
+  "3": { "name": "Lead Pipe", "kind": "melee", "hand": "0xF", "rank": 2 },
+  "4": { "name": "Baseball Bat", "kind": "melee", "hand": "0x13", "rank": 1 },
+  "5": { "name": "Knife", "kind": "melee", "hand": "0x6D", "rank": 4 }
 }

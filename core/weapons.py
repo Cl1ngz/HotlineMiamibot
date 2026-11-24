@@ -64,6 +64,14 @@ def find_goals(mem, cards):
     return found
 
 
+def held_rank(hand, names):
+    """Rank of the weapon in your hand (card +0xA0 at rest), or None: not a weapon we know (mid-swing, a gun...)."""
+    for info in names.values():
+        if "hand" in info and int(info["hand"], 16) == hand:
+            return info.get("rank", 0)
+    return None
+
+
 def choose_weapon(weapons, you, enemy_far, lines):
     """The weapon to go for, (x, y), or None.
     Only weapons you can see, and only if the nearest one is closer than the enemy (enemy_far = math.inf: no enemy).

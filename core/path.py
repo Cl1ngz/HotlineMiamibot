@@ -48,7 +48,7 @@ def guess(cell, goal_cell):
     return abs(cell[0] - goal_cell[0]) + abs(cell[1] - goal_cell[1])
 
 
-def find_path(start, goal, blocked):
+def find_path(start, goal, blocked, max_cells=MAX_CELLS):
     """The shortest way from start to goal around blocked cells, as points to walk through.
     A*: the cells that look closest to the goal go first, so on open floor it goes almost straight there.
     Never None: can't get to the goal -> the way to the cell closest to it."""
@@ -70,7 +70,7 @@ def find_path(start, goal, blocked):
     todo = [(guess(start_cell, goal_cell), 0, start_cell)]
     best = start_cell  # closest cell to the goal so far - the way goes there if the goal can't be reached
     tried = 0
-    while todo and tried < MAX_CELLS:
+    while todo and tried < max_cells:
         _, steps, here = heapq.heappop(todo)
         if here == goal_cell:
             break
@@ -105,3 +105,15 @@ def find_path(start, goal, blocked):
 
     path.reverse()
     return path
+
+
+def walk_steps(start, xy, blocked, most):
+    """Steps (CELL each) to walk to xy, or None: more than `most`, no way there, or the way comes at xy from
+    the wrong side of a wall (its last free cell is more than a cell away - xy's own cell can sit in a wall)."""
+    way = find_path(start, xy, blocked, 20 * most)
+    if cell_of(way[-1]) != cell_of(xy) or len(way) - 1 > most:
+        return None
+    free = [point for point in way if cell_of(point) not in blocked]
+    if not free or math.dist(free[-1], xy) > CELL:
+        return None
+    return len(way) - 1

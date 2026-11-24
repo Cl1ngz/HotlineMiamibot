@@ -3,7 +3,7 @@
 import math
 
 from core import lockon
-from core.enemies import find_me_card, is_enemy
+from core.enemies import find_me_card, is_enemy, shelf_cards
 from core.memory import X_OFF, Y_OFF, read_double, read_kind, table_cards, where
 from core.path import blocked_cells
 from core.scenes import scene_id
@@ -29,6 +29,9 @@ ARRIVAL_NEAR = 64
 JUMP = 100  # you moved this far in one frame: a new floor, or the floor again after a death
 # someone dropped out of the enemies: his NEW card can be on the shelf only - look at all of it this long
 RESCAN_FOR = 0.2
+# nobody left that we know of: look this many cards around the table, not the usual AROUND (64) - after a
+# restart the last enemies and the car can lie further (the bot didn't see who killed it, then not the car)
+WIDE = 1024
 
 
 def see(eyes, now):
@@ -39,7 +42,12 @@ def see(eyes, now):
     shelf = Shelf(game.mem)
     # enemies from the whole shelf: every SCAN_EVERY, and EVERY frame for a moment after someone dropped out
     if now >= eyes.next_scan or now < eyes.rescan_until:
-        eyes.enemies = {r for r in shelf.cards if is_enemy(shelf, r, game.rules)}
+        scan_cards = (
+            shelf.cards if eyes.still else shelf_cards(shelf, shelf.records, WIDE)
+        )
+        found = {r for r in scan_cards if is_enemy(shelf, r, game.rules)}
+        # the ones we already follow stay, even when they're outside the usual shelf
+        eyes.enemies = found | {r for r in eyes.still if is_enemy(shelf, r, game.rules)}
     if now >= eyes.next_scan:
         records = shelf.records
         # the stairs take you to a new floor with NO pause, so a new wall count = read the walls now
@@ -78,9 +86,9 @@ def see(eyes, now):
         if stairs is None:
             eyes.came_by = None
         eyes.stairs = stairs
-        eyes.car = find_car(shelf, records, shelf.cards)
+        eyes.car = find_car(shelf, records, scan_cards)
         eyes.weapons = [
-            (x, y)
+            (x, y, game.names[frame].get("rank", 0))
             for x, y, frame in find_weapons(shelf, shelf.cards)
             if game.names.get(frame, {}).get("kind") == "melee"
         ]

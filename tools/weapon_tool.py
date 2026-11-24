@@ -87,7 +87,7 @@ if args and args[0] == "name":
     old = names.get(frame)
     if old and old["name"] != weapon:
         print(f"careful: frame {frame} was saved as {old['name']} - now it's {weapon}")
-    names[frame] = {"name": weapon, "kind": kind}
+    names[frame] = {**names.get(frame, {}), "name": weapon, "kind": kind}
     save(names)
     print(f"saved: frame {frame} = {weapon} ({kind})")
     show_known()

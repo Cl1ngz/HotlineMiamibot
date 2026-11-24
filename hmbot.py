@@ -48,6 +48,7 @@ def pause(err, eyes, hands, legs, now):
     else:
         # a new floor, the menu, the score screen, a title card: forget the old floor, read the new one at once
         lockon.reset()
+        eyes.still = []
         eyes.stairs = None
         eyes.car = None
         legs.learned.clear()

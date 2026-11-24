@@ -2,9 +2,9 @@
 # bot/decide.py - decide(): what we want this frame, a Plan. Looks only at Eyes (and Hands) - never at the game
 import math
 
-from core.path import cell_of
+from core.path import cell_of, walk_steps
 from core.walls import can_see
-from core.weapons import choose_weapon
+from core.weapons import choose_weapon, held_rank
 
 from . import game
 from .boxes import Plan
@@ -23,6 +23,8 @@ BACK_ROOM = (
 # walk this close to what the red arrow points at / to a spot shown with tools/scene_tool.py (then tap LMB)
 ARROW_WALK = 8
 SPOT_WALK = 8
+# a better weapon this many steps (16 each) of WALKING away, nobody in sight: swap - a chance on the way, not a trip
+SWAP_STEPS = 10
 
 
 # ↖  ↑ ↗
@@ -62,8 +64,22 @@ def decide(eyes, hands, now):
     time_left = hands.ready_at - now if hands.ready_at > now else 0
 
     grab = None
-    if eyes.hand in EMPTY_HANDS:
-        grab = choose_weapon(eyes.weapons, you, enemy_far, eyes.lines)
+    held = 0 if eyes.hand in EMPTY_HANDS else held_rank(eyes.hand, game.names)
+    if held == 0:
+        # empty hands: any weapon closer than the enemy
+        grab = choose_weapon(
+            [(x, y) for x, y, rank in eyes.weapons], you, enemy_far, eyes.lines
+        )
+    elif held is not None and target_xy is None:
+        # a weapon in hand, nobody in sight: a better one a few steps of WALKING away. Not "in sight":
+        # by a wall in-sight flips on and off as you walk, and the bot turned back and forth
+        for x, y, rank in sorted(eyes.weapons, key=lambda w: math.dist(w[:2], you)):
+            if (
+                rank > held
+                and walk_steps(you, (x, y), eyes.blocked, SWAP_STEPS) is not None
+            ):
+                grab = (x, y)
+                break
     if grab is None and eyes.goals and not eyes.still:
         # floor clear: take the level's goal wherever it lies (the right button swaps it for the weapon)
         grab = min(eyes.goals, key=lambda xy: math.dist(xy, you))
