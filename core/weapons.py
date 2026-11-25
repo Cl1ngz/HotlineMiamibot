@@ -99,6 +99,15 @@ def gun_frame(hand, names):
     return None
 
 
+def enemy_gun(picture, names):
+    """Does an enemy with this picture (his card +0xA0) carry a gun? ("enemy" of a gun in weapon_names.json)"""
+    return any(
+        picture in pictures(info, "enemy")
+        for info in names.values()
+        if info.get("kind") == "gun"
+    )
+
+
 def held_gun(hand, names):
     """Does your hand show a gun - at rest or shooting?"""
     return gun_frame(hand, names) is not None

@@ -53,6 +53,9 @@ class Eyes:
     hidden: dict = field(default_factory=dict)
     # the target (one of spots): is he lying, is a door between you (walk INTO it)
     target: int | None = None
+    gunmen: dict = field(
+        default_factory=dict
+    )  # {card: (x, y)} the standing ones you see with a gun
     lying: bool = False
     behind_door: bool = False
     # seen and not lying = can hit you; how fast the target runs at you (px/s, >0 = toward you)

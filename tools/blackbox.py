@@ -130,6 +130,8 @@ WALKING = {"W", "A", "S", "D"}
 ME_LAYER, AIM_LAYER, WALL_LAYER = 0x2C, 0xAF, 0x9
 LOOK_NEAR = 8  # the look is this close to an enemy -> your character looks at him
 ITEM_NEAR = 60  # weapons appearing / disappearing this close to you are events (far ones are noise)
+# a weapon showing up this close to where an enemy just dropped out (died / knocked down), this soon = his
+DROP_NEAR, DROP_TIME = 40, 1.5
 STUCK_FOR, STUCK_MOVE = (
     1.5,
     2,
@@ -310,6 +312,8 @@ rec = Recorder()
 records, candidates, lines, near_text = {}, [], [], []
 items = {"stairs": None, "car": None, "goals": set(), "weapons": set(), "map": None}
 alive = {}  # enemy card -> where he was, last sample
+alive_pic = {}  # enemy card -> his picture (+0xA0), last sample
+dropped_out = []  # (when, where, card, picture) of enemies that just left the list - who dropped what
 hand = None
 you = last_you = None
 hidden_since, gone_told, dead_told = None, False, False
@@ -370,8 +374,15 @@ try:
                     weapons = {
                         (round(x), round(y), frame)
                         for x, y, frame in find_weapons(mem, shelf)
-                        if frame
                     }
+                    # a new weapon where an enemy just dropped out = his: which picture holds which weapon
+                    dropped_out[:] = [d for d in dropped_out if now - d[0] < DROP_TIME]
+                    for x, y, frame in weapons - items["weapons"]:
+                        for when, xy, card, pic in dropped_out:
+                            if math.dist((x, y), xy) < DROP_NEAR:
+                                events.append(
+                                    f"enemy {card:#x} (+0xA0 {pic:#x}) dropped {weapon_name(frame)} at ({x},{y})"
+                                )
                     if you is not None:
                         for x, y, frame in weapons ^ items["weapons"]:
                             if math.dist((x, y), you) < ITEM_NEAR:
@@ -523,6 +534,7 @@ try:
                         continue
                     if line.startswith("ENEMY"):
                         now_alive[card] = xy_of(card)
+                        alive_pic[card] = read_u32(mem, card + 0xA0)
                     if "enemies" in what and (args.bodies or line.startswith("ENEMY")):
                         details.append(line)
                 for card in now_alive.keys() - alive.keys():
@@ -537,6 +549,7 @@ try:
                     events.append(
                         f"enemy {card:#x} {'died' if died else 'is gone'} at {spot(alive[card])}"
                     )
+                    dropped_out.append((now, alive[card], card, alive_pic.pop(card, 0)))
                 alive = now_alive
                 if near_text:
                     details += near_text

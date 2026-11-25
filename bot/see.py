@@ -1,221 +1,212 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
-# bot/see.py - see(): everything the bot needs from the game into Eyes, once a frame
+# bot/decide.py - decide(): what we want this frame, a Plan. Looks only at Eyes (and Hands) - never at the game
 import math
 
-from core import lockon
-from core.enemies import find_me_card, is_enemy, shelf_cards
-from core.memory import X_OFF, Y_OFF, read_double, read_kind, table_cards, where
-from core.path import blocked_cells
-from core.scenes import scene_id
-from core.shelf import Shelf
-from core.stairs import find_car, find_stairs
-from core.walls import WALL, crosses_box, door_boxes, real_walls, wall_lines
-from core.weapons import find_goals, find_weapons, gun_frame, held_gun, read_ammo
+from core.path import cell_of, walk_steps
+from core.walls import can_see
+from core.weapons import choose_weapon, held_rank
 
 from . import game
-from .config import GUN_RANK
+from .boxes import Plan
+from .config import EMPTY_HANDS, GRAB_REACH, GUN_RANGE, GUN_RANK, REACH, THROW_RANGE
 
-SCAN_EVERY = 0.25  # the slow part: enemies, weapons, stairs, the car
-WALLS_EVERY = 2.0  # walls, sofas and fake doors never move
-# card +0x10 of a knocked out enemy (0x12b = the one by the dumpster, with the red arrow over him)
-KNOCKED = (0x16, 0x12B)
-# an execution takes 1 s and an enemy runs ~180 in that time: no SPACE while someone stands closer
-EXEC_SAFE = 200
-# a standing enemy this close: aim at the NEAREST one (of two running at you, the first one there gets hit first)
-NEAREST_FIRST = 120
-CLOSING_EVERY = 0.1  # measure his run over this long (every frame is too jumpy: the same game frame read twice)
-# stairs lit this soon after you came, this close to you, are the ones you came by - they lead BACK
-ARRIVAL_TIME = 1.5
-ARRIVAL_NEAR = 64
-# our empty gun lands this long after it left the hand (thrown ~1 s) - a new gun of its kind by then = it
-LANDS_IN = 2.0
-SAME_SPOT = 10  # a gun this close to where our empty one lies is that one
-JUMP = 100  # you moved this far in one frame: a new floor, or the floor again after a death
-# someone dropped out of the enemies: his NEW card can be on the shelf only - look at all of it this long
-RESCAN_FOR = 0.2
-# nobody left that we know of: look this many cards around the table, not the usual AROUND (64) - after a
-# restart the last enemies and the car can lie further (the bot didn't see who killed it, then not the car)
-WIDE = 1024
-
-
-def sort_weapons(eyes, floor, now):
-    """eyes.weapons [(x, y, rank)] from the weapons on the floor [(x, y, frame)]: melee with its rank, guns with
-    GUN_RANK - but not where our empty gun lies, and not a gun we don't know in the hand (no "hand" in
-    weapon_names.json: the bot couldn't tell it's a gun)."""
-    guns = {
-        (round(x), round(y), frame)
-        for x, y, frame in floor
-        if game.names.get(frame, {}).get("kind") == "gun"
-    }
-    if eyes.lost_gun is not None and now - eyes.lost_gun[1] > LANDS_IN:
-        eyes.lost_gun = None
-    if eyes.lost_gun is not None:
-        # a gun of its kind that wasn't on the floor at the last scan = ours, landed
-        eyes.empty_guns += [
-            (x, y)
-            for x, y, frame in guns - eyes.floor_guns
-            if frame == eyes.lost_gun[0]
-        ]
-    eyes.floor_guns = guns
-    eyes.weapons = []
-    for x, y, frame in floor:
-        info = game.names.get(frame, {})
-        if info.get("kind") == "melee":
-            eyes.weapons.append((x, y, info.get("rank", 0)))
-        elif (
-            info.get("kind") == "gun"
-            and info.get("hand")
-            and not any(math.dist((x, y), xy) < SAME_SPOT for xy in eyes.empty_guns)
-        ):
-            eyes.weapons.append((x, y, GUN_RANK))
+EXECUTE_WALK = 16  # walk this close to a lying enemy - inside act.py's EXECUTE_REACH (30), not at its edge
+ENEMY_SPEED = 180  # how fast an enemy runs
+BACK_STEP = 24  # back off this far at a time - less than walk.py's STRAIGHT, so the legs go straight there
+# an enemy running at you faster than this, this close: he's CHARGING - meet him standing
+# (running into him doubles the speed you meet at, and in the logs he always hit first)
+CHARGE_SPEED = 60
+MEET_FAR = 150
+BACK_ROOM = (
+    48  # backing off: only where there's this much free room (never back into a wall)
+)
+# walk this close to what the red arrow points at / to a spot shown with tools/scene_tool.py (then tap LMB)
+ARROW_WALK = 8
+SPOT_WALK = 8
+# a better weapon this many steps (16 each) of WALKING away, nobody in sight: swap - a chance on the way, not a trip
+SWAP_STEPS = 10
+# someone in sight: a gun this much closer than him (0.5 = half his distance) is still worth grabbing first
+GUN_BEFORE = 0.5
+# this much ammo or less: a gun lying around (full) beats yours - swap when nobody's in sight
+LOW_AMMO = 1
+# with a gun: walk up to this far from the enemy, then stand and shoot (a bit inside act.py's GUN_RANGE)
+SHOOT_FROM = 0.8 * GUN_RANGE
+MISSES = 2
 
 
-def see(eyes, now):
-    """Read everything the bot needs from the game into eyes.
-    Raises OSError when there's no player: the menu, a new floor, or you sit on an enemy.
+# ↖  ↑ ↗
+# ← you →  8 directions, steps 24
+# ↙  ↓  ↘
+def back_off_point(you, threats, blocked, lines):
+    """Where to step back while the weapon gets ready, or None (a wall or a corner behind you).
+    Of 8 directions with BACK_ROOM free: the one that leaves you furthest from the closest enemy.
     """
-    # one photo of the game's memory for THIS frame - every read below goes through it
-    shelf = Shelf(game.mem)
-    # enemies from the whole shelf: every SCAN_EVERY, and EVERY frame for a moment after someone dropped out
-    if now >= eyes.next_scan or now < eyes.rescan_until:
-        scan_cards = (
-            shelf.cards if eyes.still else shelf_cards(shelf, shelf.records, WIDE)
-        )
-        found = {r for r in scan_cards if is_enemy(shelf, r, game.rules)}
-        # the ones we already follow stay, even when they're outside the usual shelf
-        eyes.enemies = found | {r for r in eyes.still if is_enemy(shelf, r, game.rules)}
-    if now >= eyes.next_scan:
-        records = shelf.records
-        # the stairs take you to a new floor with NO pause, so a new wall count = read the walls now
-        # (with the old ones the way leads you straight back onto the stairs)
-        wall_cards = sum(
-            1 for card in records if read_kind(shelf, card, 0, 0x14) == WALL
-        )
-        if wall_cards != eyes.wall_cards:
-            eyes.wall_cards = wall_cards
-            eyes.next_walls = 0
-        if now >= eyes.next_walls:
-            # every wall and sofa once, as (xy, box) - a new floor name = you just came
-            walls = real_walls(shelf, records, shelf.cards)
-            scene = scene_id(walls)
-            if scene != eyes.scene:
-                eyes.arrived_at = now
-                eyes.empty_guns = []
-            eyes.scene = scene
-            # lines you can't see through, every door (real or fake - pushing tells, walk() does it),
-            # cells you can't stand in (walls + the doors we know never open here)
-            eyes.lines = wall_lines([xy for xy, box in walls])
-            eyes.doors = door_boxes(shelf, shelf.cards)
-            boxes = [box for xy, box in walls] + [
-                tuple(box) for box in game.fake_doors.get(scene, [])
-            ]
-            eyes.blocked = blocked_cells(boxes)
-            eyes.next_walls = now + WALLS_EVERY
-        # stairs lit right after you came, right next to you = the ones you came by; when they go off and
-        # light up again, the floor is done
-        stairs = find_stairs(shelf, records)
+    closest_now = min(math.dist(you, xy) for xy in threats)
+    best, best_far = None, closest_now
+    for i in range(8):
+        dx, dy = math.cos(i * math.pi / 4), math.sin(i * math.pi / 4)
+        step = (you[0] + dx * BACK_STEP, you[1] + dy * BACK_STEP)
+        room = (you[0] + dx * BACK_ROOM, you[1] + dy * BACK_ROOM)
         if (
-            stairs is not None
-            and now - eyes.arrived_at < ARRIVAL_TIME
-            and math.dist(eyes.you, stairs) < ARRIVAL_NEAR
+            cell_of(step) in blocked
+            or cell_of(room) in blocked
+            or not can_see(you, room, lines)
         ):
-            eyes.came_by = stairs
-        if stairs is None:
-            eyes.came_by = None
-        eyes.stairs = stairs
-        eyes.car = find_car(shelf, records, scan_cards)
-        sort_weapons(eyes, find_weapons(shelf, shelf.cards), now)
-        eyes.goals = find_goals(shelf, shelf.cards)
-        eyes.next_scan = now + SCAN_EVERY
-    # every frame: table cards that just became enemies (new, or a sitting one stood up) - now, not next scan
-    cards = table_cards(shelf)
-    for card in cards - eyes.enemies:
-        if is_enemy(shelf, card, game.rules):
-            eyes.enemies.add(card)
+            continue  # a wall there
+        far = min(
+            math.dist(step, xy) for xy in threats
+        )  # the closest enemy after the step
+        if far > best_far:
+            best, best_far = step, far
+    # None = every free step takes you closer to someone: cornered
+    return best
 
-    # you - moved far in one frame = you just came (a new floor, or again after a death)
-    me = find_me_card(shelf)
-    if me is None:
-        raise OSError("no player found")
-    you = (read_double(shelf, me + X_OFF), read_double(shelf, me + Y_OFF))
-    if math.dist(you, eyes.you) > JUMP:
-        eyes.arrived_at = now
-    eyes.you = you
-    eyes.you_seen_at = now
-    eyes.hand = read_kind(shelf, me, 0, 0xA0)
-    old_gun, old_ammo = gun_frame(eyes.hand, game.names), eyes.ammo
-    eyes.hand = read_kind(shelf, me, 0, 0xA0)
-    # the ammo stays from the last gun after you throw it - it means something only with a gun in hand
-    eyes.gun = held_gun(eyes.hand, game.names)
-    if not eyes.gun:
-        eyes.ammo = None
-    else:
-        # the links to the ammo can't always be read (None) - keep the last number then
-        ammo = read_ammo(shelf)
-        if ammo is not None:
-            eyes.ammo = ammo
-    # an empty gun just left your hand - thrown, or swapped for another weapon (one of its own kind too: then
-    # the ammo jumps up): it'll lie somewhere, empty
-    if (
-        old_ammo == 0
-        and old_gun is not None
-        and (gun_frame(eyes.hand, game.names) != old_gun or eyes.ammo)
-    ):
-        eyes.lost_gun = (old_gun, now)
 
-    # still = enemies RIGHT NOW (a body drops out at once); someone dropped out -> rescan the shelf for a moment
-    eyes.still = [card for card in eyes.enemies if is_enemy(shelf, card, game.rules)]
-    if len(eyes.still) < len(eyes.enemies):
-        eyes.rescan_until = now + RESCAN_FOR
-    # who you see, who of them stands (can hit you), who stands close enough to reach you during an execution
-    eyes.spots = lockon.visible_enemies(shelf, eyes.still, eyes.you, eyes.lines)
-    eyes.threats = {
-        card: xy
-        for card, xy in eyes.spots.items()
-        if read_kind(shelf, card, 0, 0x10) not in KNOCKED
-    }
-    danger = {
-        card: xy
-        for card, xy in eyes.threats.items()
-        if math.dist(xy, eyes.you) < EXEC_SAFE
-    }
-    # who to aim at: someone standing close -> the nearest one, else the dangerous ones, else everyone you see
-    # (an empty dict counts as False)
-    near = {
-        card: xy
-        for card, xy in eyes.threats.items()
-        if math.dist(xy, eyes.you) < NEAREST_FIRST
-    }
-    if near:
-        nearest = min(near, key=lambda card: math.dist(near[card], eyes.you))
-        pick = {nearest: near[nearest]}
+def decide(eyes, hands, now):
+    """What we want this frame -> a Plan. Looks at eyes (and hands: when the weapon is ready), never at the game.
+    The first that fits wins: a weapon (empty hands) or the level goal (floor clear), the enemy you see,
+    an enemy behind a wall, the red arrow, the car, the stairs, a shown spot."""
+    you = eyes.you
+    target_xy = eyes.spots.get(eyes.target)
+    enemy_far = math.dist(target_xy, you) if target_xy is not None else math.inf
+    time_left = hands.ready_at - now if hands.ready_at > now else 0
+
+    grab = None
+    if eyes.gun:
+        # ammo None = can't read it now: keep the gun. Almost empty: any gun lying around is better
+        if eyes.ammo == 0:
+            held = 0
+        elif eyes.ammo is not None and eyes.ammo <= LOW_AMMO:
+            held = GUN_RANK - 1
+        else:
+            held = GUN_RANK
     else:
-        # a loaded gun kills a standing one with one click from afar: them first, the lying ones wait
-        shoot = eyes.threats if eyes.gun and eyes.ammo != 0 else {}
-        pick = danger or shoot or eyes.spots
-    eyes.target = lockon.choose_target(pick, eyes.you)
-    eyes.lying = (
-        eyes.target is not None and read_kind(shelf, eyes.target, 0, 0x10) in KNOCKED
-    )
-    # a real door between you and the target (the fake ones are walls already)
-    eyes.behind_door = eyes.target is not None and any(
-        crosses_box(eyes.you, eyes.spots[eyes.target], box)
-        for box in eyes.doors
-        if list(box) not in game.fake_doors.get(eyes.scene, [])
-    )
-    # how fast the target runs at you: his step along the line from him to you, per second (not your steps)
-    if now - eyes.last_seen_at >= CLOSING_EVERY:
-        eyes.closing = 0.0
-        if eyes.target in eyes.last_spots:
-            (x0, y0), (x1, y1) = eyes.last_spots[eyes.target], eyes.spots[eyes.target]
-            far = math.dist((x1, y1), eyes.you)
-            if far > 0:
-                eyes.closing = (
-                    ((x1 - x0) * (eyes.you[0] - x1) + (y1 - y0) * (eyes.you[1] - y1))
-                    / far
-                    / (now - eyes.last_seen_at)
+        held = 0 if eyes.hand in EMPTY_HANDS else held_rank(eyes.hand, game.names)
+    if held == 0:
+        # empty hands: any weapon closer than the enemy
+        grab = choose_weapon(
+            [(x, y) for x, y, rank in eyes.weapons], you, enemy_far, eyes.lines
+        )
+    elif held is not None:
+        # a weapon in hand: a better one a few steps of WALKING away (not "in sight": by a wall in-sight flips
+        # on and off as you walk, and the bot turned back and forth). Someone in sight: only a gun, and only
+        # if it's much closer than him - grab it, then shoot him
+        for x, y, rank in sorted(eyes.weapons, key=lambda w: math.dist(w[:2], you)):
+            if (
+                rank > held
+                and (
+                    target_xy is None
+                    or (
+                        rank >= GUN_RANK
+                        and math.dist((x, y), you) < enemy_far * GUN_BEFORE
+                    )
                 )
-        eyes.last_spots, eyes.last_seen_at = dict(eyes.spots), now
-    eyes.hidden = where(shelf, eyes.still)
-    # the red arrow only when nobody is left (not needed in a fight, and it costs a little every frame)
-    eyes.arrow = None if eyes.still else game.watch.update(now)
+                and walk_steps(you, (x, y), eyes.blocked, SWAP_STEPS) is not None
+            ):
+                grab = (x, y)
+                break
+    if grab is None and eyes.goals and not eyes.still:
+        # floor clear: take the level's goal wherever it lies (the right button swaps it for the weapon)
+        grab = min(eyes.goals, key=lambda xy: math.dist(xy, you))
+    if grab is not None:
+        return Plan(
+            grab=grab,
+            goal=grab,
+            close_enough=GRAB_REACH,
+            text=f"GRABBING {math.dist(grab, you):3.0f} away",
+        )
+
+    if target_xy is not None:
+        if eyes.behind_door and not eyes.lying:
+            # a closed door between you: a swing only hits the door - walk INTO it, it swings open
+            # and knocks him down if he stands right behind it
+            return Plan(
+                goal=target_xy,
+                close_enough=0,
+                text=f"THROUGH THE DOOR to an enemy {enemy_far:3.0f} away",
+            )
+        if eyes.gun and eyes.ammo == 0 and not eyes.lying:
+            # an empty gun only clicks: throw it at him (it knocks him down), then it's fists
+            return Plan(
+                goal=target_xy,
+                close_enough=THROW_RANGE,
+                throw=True,
+                text=f"THROWING the empty gun at an enemy {enemy_far:3.0f} away",
+            )
+        # back off: he stands, the weapon isn't ready yet, and he'll be in reach before it is
+        if (
+            not eyes.lying
+            and time_left > 0
+            and enemy_far < REACH + ENEMY_SPEED * time_left
+        ):
+            threats = list(eyes.threats.values()) or [target_xy]
+            back = back_off_point(you, threats, eyes.blocked, eyes.lines)
+            if back is not None:
+                return Plan(
+                    goal=back,
+                    close_enough=0,
+                    text=f"BACKING OFF {enemy_far:3.0f} away, ready in {time_left:.2f} s",
+                )
+            # no room behind you: stand, the swing comes the moment the weapon is ready
+            return Plan(
+                text=f"CORNERED {enemy_far:3.0f} away, ready in {time_left:.2f} s - standing"
+            )
+        if not eyes.lying and eyes.closing > CHARGE_SPEED and enemy_far < MEET_FAR:
+            # he runs at you: stand and let him come into your swing (act() presses early enough)
+            return Plan(
+                text=f"MEETING a charging enemy {enemy_far:3.0f} away, {eyes.closing:3.0f}/s"
+            )
+        if eyes.gun and eyes.ammo != 0 and not eyes.lying:
+            # a gun: no need to walk up to him - get within SHOOT_FROM and stand, act() fires.
+            # A lying one can't be shot (bullets fly over him) - he gets executed like with fists.
+            # Still up after MISSES shots: something's in the way (an open door) - walk up, act() fires on the way
+            missed = hands.shot_at == eyes.target and hands.shots >= MISSES
+            return Plan(
+                goal=target_xy,
+                close_enough=REACH if missed else SHOOT_FROM,
+                text=f"SHOOTING at an enemy {enemy_far:3.0f} away, ammo {eyes.ammo}"
+                + (", missed - closer" if missed else ""),
+            )
+        return Plan(
+            goal=target_xy,
+            close_enough=EXECUTE_WALK if eyes.lying else REACH,
+            text=f"LOCKED on {'LYING' if eyes.lying else 'standing'} enemy "
+            f"{enemy_far:3.0f} away ({len(eyes.spots)} in sight)",
+        )
+
+    if eyes.hidden:
+        goal = min(eyes.hidden.values(), key=lambda xy: math.dist(xy, you))
+        return Plan(
+            goal=goal,
+            text=f"HUNTING an enemy behind a wall {math.dist(goal, you):3.0f} away",
+        )
+    if eyes.arrow is not None:
+        return Plan(
+            goal=eyes.arrow,
+            close_enough=ARROW_WALK,
+            use=True,
+            text=f"TO THE ARROW {math.dist(eyes.arrow, you):3.0f} away",
+        )
+    if eyes.car is not None:
+        # the chapter is done: drive away (beats any stairs - some stay lit)
+        return Plan(
+            goal=eyes.car,
+            close_enough=0,
+            text=f"TO THE CAR {math.dist(eyes.car, you):3.0f} away",
+        )
+    # floor clear: go to GO! - but never to the stairs you came by, they lead back
+    if eyes.stairs is not None and eyes.stairs != eyes.came_by:
+        return Plan(
+            goal=eyes.stairs,
+            close_enough=0,
+            text=f"TO THE STAIRS {math.dist(eyes.stairs, you):3.0f} away",
+        )
+    # a floor we were shown a spot on (tools/scene_tool.py), and nothing else to do: walk there
+    spot = game.scenes.get(eyes.scene)
+    if spot is not None:
+        return Plan(
+            goal=tuple(spot),
+            close_enough=SPOT_WALK,
+            text=f"TO THE SHOWN SPOT {math.dist(spot, you):3.0f} away",
+        )
+    return Plan(text="no enemy in sight")

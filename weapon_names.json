@@ -3,43 +3,50 @@
     "name": "M16",
     "kind": "gun",
     "hand": "0x39",
-    "fire": "0x28"
+    "fire": "0x28",
+    "enemy": ["0x2b"]
   },
   "1": {
     "name": "Shotgun",
     "kind": "gun",
     "hand": "0x40",
-    "fire": "0x29"
+    "fire": "0x29",
+    "enemy": ["0x72"]
   },
   "2": {
     "name": "Golf Club",
     "kind": "melee",
     "hand": "0x16",
-    "rank": 3
+    "rank": 3,
+    "enemy": ["0x6f"]
   },
   "3": {
     "name": "Lead Pipe",
     "kind": "melee",
     "hand": "0xF",
-    "rank": 2
+    "rank": 2,
+    "enemy": ["0x6e"]
   },
   "4": {
     "name": "Baseball Bat",
     "kind": "melee",
     "hand": "0x13",
-    "rank": 1
+    "rank": 1,
+    "enemy": ["0x70"]
   },
   "5": {
     "name": "Knife",
     "kind": "melee",
     "hand": "0x6D",
-    "rank": 4
+    "rank": 4,
+    "enemy": ["0x3c"]
   },
   "6": {
     "name": "Double Barrel",
     "kind": "gun",
     "hand": "0x64",
-    "fire": ["0x5f", "0x60"]
+    "fire": ["0x5f", "0x60"],
+    "enemy": ["0x5e"]
   },
   "10": {
     "name": "Magnum",

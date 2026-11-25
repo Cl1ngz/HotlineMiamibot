@@ -106,6 +106,7 @@ try:
         let_go(hands, now)
         try:
             see(eyes, now)
+            seen = time.monotonic()
         except OSError as err:
             pause(err, eyes, hands, legs, now)
             if now >= next_share:
@@ -118,6 +119,7 @@ try:
             # no number for this gun, but presses fire nothing (no fire picture): it's empty
             eyes.ammo = 0
         plan = decide(eyes, hands, now)
+        decided = time.monotonic()
         try:
             act(plan, eyes, hands, now)
             walk(plan, eyes, legs, now)
@@ -135,7 +137,11 @@ try:
         work = (time.monotonic() - now) * 1000  # ms for see + decide + act + walk
         slowest = max(slowest, work)
         if work > 1000 / FPS:
-            print(f"\nslow loop: {work:.1f} ms")
+            # where the time went: see / decide / the rest (act, walk, the radar)
+            print(
+                f"\nslow loop: {work:.1f} ms (see {(seen - now) * 1000:.1f}, decide {(decided - seen) * 1000:.1f},"
+                f" the rest {(time.monotonic() - decided) * 1000:.1f})"
+            )
         wait_frame(eyes, now)
 except KeyboardInterrupt:
     pass
