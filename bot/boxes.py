@@ -116,6 +116,9 @@ class Legs:
     pushed_from: tuple = (0, 0)
     pushed_since: float = 0
     scene: str = ""  # the floor `learned` is about (another floor = forget it)
+    bumps: dict = field(
+        default_factory=dict
+    )  # (floor, cell) -> how many times we bumped into it
     # (floor, door box) -> how many pushes in vain, and when the last one was counted
     door_tries: dict = field(default_factory=dict)
     door_tried_at: dict = field(default_factory=dict)

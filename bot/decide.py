@@ -25,6 +25,8 @@ ARROW_WALK = 8
 SPOT_WALK = 8
 # a better weapon this many steps (16 each) of WALKING away, nobody in sight: swap - a chance on the way, not a trip
 SWAP_STEPS = 10
+# someone in sight: a gun this much closer than him (0.5 = half his distance) is still worth grabbing first
+GUN_BEFORE = 0.5
 # this much ammo or less: a gun lying around (full) beats yours - swap when nobody's in sight
 LOW_AMMO = 1
 # with a gun: walk up to this far from the enemy, then stand and shoot (a bit inside act.py's GUN_RANGE)
@@ -37,7 +39,8 @@ MISSES = 2
 # ↙  ↓  ↘
 def back_off_point(you, threats, blocked, lines):
     """Where to step back while the weapon gets ready, or None (a wall or a corner behind you).
-    Of 8 directions with BACK_ROOM free: the one that leaves you furthest from the closest enemy."""
+    Of 8 directions with BACK_ROOM free: the one that leaves you furthest from the closest enemy.
+    """
     closest_now = min(math.dist(you, xy) for xy in threats)
     best, best_far = None, closest_now
     for i in range(8):
@@ -84,12 +87,20 @@ def decide(eyes, hands, now):
         grab = choose_weapon(
             [(x, y) for x, y, rank in eyes.weapons], you, enemy_far, eyes.lines
         )
-    elif held is not None and target_xy is None:
-        # a weapon in hand, nobody in sight: a better one a few steps of WALKING away. Not "in sight":
-        # by a wall in-sight flips on and off as you walk, and the bot turned back and forth
+    elif held is not None:
+        # a weapon in hand: a better one a few steps of WALKING away (not "in sight": by a wall in-sight flips
+        # on and off as you walk, and the bot turned back and forth). Someone in sight: only a gun, and only
+        # if it's much closer than him - grab it, then shoot him
         for x, y, rank in sorted(eyes.weapons, key=lambda w: math.dist(w[:2], you)):
             if (
                 rank > held
+                and (
+                    target_xy is None
+                    or (
+                        rank >= GUN_RANK
+                        and math.dist((x, y), you) < enemy_far * GUN_BEFORE
+                    )
+                )
                 and walk_steps(you, (x, y), eyes.blocked, SWAP_STEPS) is not None
             ):
                 grab = (x, y)

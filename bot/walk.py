@@ -21,6 +21,9 @@ STRAIGHT = 32
 # (a bin, a car) - that cell is blocked for FORGET_AFTER (a dialogue stops you too, so not for ever)
 BUMP_AFTER = 0.4
 FORGET_AFTER = 8
+# the same cell bumped again on this floor (after it was forgotten, after a death): something solid the walls
+# don't know (a railing, a counter) - blocked this long, so the bot doesn't learn it again on every try
+SOLID_FOR = 120
 # just arrived (a new floor, a restart): the game holds you still ~2 s, pushing then is no bump -
 # bumps count again once you've moved from the arrival spot, or after SETTLE
 SETTLE = 3
@@ -114,8 +117,12 @@ def walk(plan, eyes, legs, now):
             now,
         )  # not pushing, or moving fine: count again
     elif now - legs.pushed_since > BUMP_AFTER and settled:
-        # that cell is blocked for a while
-        legs.learned[cell_of(point)] = now + FORGET_AFTER
+        # that cell is blocked for a while - for long if we bumped into it before on this floor
+        spot = (eyes.scene, cell_of(point))
+        legs.bumps[spot] = legs.bumps.get(spot, 0) + 1
+        legs.learned[cell_of(point)] = now + (
+            FORGET_AFTER if legs.bumps[spot] == 1 else SOLID_FOR
+        )
         door = door_at(you, eyes.doors)
         if door is not None:
             tried = (

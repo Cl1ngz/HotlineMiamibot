@@ -64,7 +64,7 @@ def pause(err, eyes, hands, legs, now):
         eyes.empty_guns = []
         eyes.stairs = None
         eyes.car = None
-        legs.learned.clear()
+        # (the legs' bumps stay: walk() forgets them on another floor - after a death here they're still true)
         eyes.next_scan = 0
         eyes.next_walls = 0
         status(f"{err} (paused)")
