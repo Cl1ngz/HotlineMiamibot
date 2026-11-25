@@ -10,7 +10,7 @@ from core.scenes import scene_id
 from core.shelf import Shelf
 from core.stairs import find_car, find_stairs
 from core.walls import WALL, crosses_box, door_boxes, real_walls, wall_lines
-from core.weapons import find_goals, find_weapons
+from core.weapons import find_goals, find_weapons, held_gun, read_ammo
 
 from . import game
 
@@ -109,6 +109,8 @@ def see(eyes, now):
         eyes.arrived_at = now
     eyes.you = you
     eyes.hand = read_kind(shelf, me, 0, 0xA0)
+    # the ammo stays from the last gun after you throw it - it means something only with a gun in hand
+    eyes.ammo = read_ammo(shelf) if held_gun(eyes.hand, game.names) else None
 
     # still = enemies RIGHT NOW (a body drops out at once); someone dropped out -> rescan the shelf for a moment
     eyes.still = [card for card in eyes.enemies if is_enemy(shelf, card, game.rules)]

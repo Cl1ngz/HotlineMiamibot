@@ -1,7 +1,7 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
 # tools/weapon_tool.py - everything about weapon names, in one place (they live in weapon_names.json)
 #
-# A weapon lying on the floor = a card on the floor layer (-100) with folder picture 0x15. The frame number
+# A weapon lying on the floor = a card on the floor layer (-100) with folder picture 0x15 and 7 at card +0x10. The frame number
 # (the double at card +0x98) says WHICH weapon it is. hmbot only picks up weapons whose kind is "melee".
 #
 #   python -m tools.weapon_tool                        the known weapons + every weapon on the floor right now
@@ -72,7 +72,7 @@ if args and args[0] == "name":
         raise SystemExit("no crosshair - are you in a level?")
     near = [
         (math.dist(w[:2], aim), w[2])
-        for w in floor_weapons(mem).values()
+        for w in floor_weapons(mem)
         if math.dist(w[:2], aim) < CLOSE
     ]
     if not near:
@@ -80,10 +80,6 @@ if args and args[0] == "name":
             "no weapon under the crosshair - aim right at it (it has to lie still on the floor)"
         )
     frame = min(near)[1]
-    if frame == 0:
-        raise SystemExit(
-            "that's a frame-0 phantom (doors have them too), not a weapon - aim at the weapon itself"
-        )
     old = names.get(frame)
     if old and old["name"] != weapon:
         print(f"careful: frame {frame} was saved as {old['name']} - now it's {weapon}")
@@ -113,17 +109,11 @@ print(
     if weapons
     else "\nno weapons on the floor (or not in a level)"
 )
-for card, (x, y, frame) in sorted(
-    weapons.items(), key=lambda cw: math.dist(cw[1][:2], you) if you else 0
-):
-    label = (
-        "phantom (frame 0)"
-        if frame == 0
-        else names.get(frame, {}).get("name", f"UNKNOWN frame {frame}")
-    )
+for x, y, frame in sorted(weapons, key=lambda w: math.dist(w[:2], you) if you else 0):
+    label = names.get(frame, {}).get("name", f"UNKNOWN frame {frame}")
     far = f"far {math.dist((x, y), you):4.0f}" if you else ""
     print(f"  {label:20} at ({x:4.0f},{y:4.0f})  {far}")
-if any(frame not in names and frame != 0 for _, _, frame in weapons.values()):
+if any(frame not in names for _, _, frame in weapons):
     print(
         '\nname the UNKNOWN ones: python -m tools.weapon_tool name "Shotgun" gun   (aim at it)'
     )

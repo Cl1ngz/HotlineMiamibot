@@ -4,18 +4,28 @@
 import json
 import math
 
-from .memory import X_OFF, Y_OFF, read_double, read_kind
+from .memory import X_OFF, Y_OFF, read_bytes, read_double, read_kind, read_u32
 from .walls import can_see
 
 # layer -100: things lying on the floor
 FLOOR = 0xFFFFFF9C
 # the picture every weapon on the floor has
 MARK = 0x15
+# card +0x10 of every weapon (enemies have 6 there) - the frame-0 phantoms by the doors have 21 or 23
+WEAPON = 7
 # where the frame number (= which weapon) sits in the card
 FRAME = 0x98
 NAMES_FILE = "weapon_names.json"
 # the picture of a goal to take for the level: the briefcase (there are 4-5 such things - more to find)
 GOAL = 0xCB
+# your ammo: a 4-byte whole number on the heap, reached by links from fixed places in the game file
+# (helpers_for_me/ammo_chains - they lasted a new floor, a death and a game restart). The first one that reads wins.
+AMMO_CHAINS = [
+    (0xB99178, [0x330, 0x78, 0x167], 0x8),
+    (0xB9F06C, [0x115, 0x10, 0x167], 0x8),
+    (0xBA1D08, [0x112, 0x9D, 0x167], 0x8),
+]
+AMMO_MOST = 250  # more than this = junk
 
 
 def load_names():
@@ -32,10 +42,11 @@ def find_weapons(mem, cards):
     found = []
     for card in cards:
         try:
-            # the weapon signature: layer FLOOR and picture MARK
+            # the weapon signature: layer FLOOR, picture MARK and WEAPON at +0x10
             if (
                 read_kind(mem, card, 0, 0x14) == FLOOR
                 and read_kind(mem, card, 1, 0x10) == MARK
+                and read_kind(mem, card, 0, 0x10) == WEAPON
             ):
                 x = read_double(mem, card + X_OFF)
                 y = read_double(mem, card + Y_OFF)
@@ -64,11 +75,43 @@ def find_goals(mem, cards):
     return found
 
 
+def pictures(info, key):
+    """The hand picture(s) of a weapon_names.json entry as numbers - "fire" can be one or a list."""
+    value = info.get(key, [])
+    return [int(v, 16) for v in (value if isinstance(value, list) else [value])]
+
+
 def held_rank(hand, names):
     """Rank of the weapon in your hand (card +0xA0 at rest), or None: not a weapon we know (mid-swing, a gun...)."""
     for info in names.values():
         if "hand" in info and int(info["hand"], 16) == hand:
             return info.get("rank", 0)
+    return None
+
+
+def held_gun(hand, names):
+    """Does your hand show a gun - at rest or shooting ("hand" / "fire" of a gun in weapon_names.json)?"""
+    return any(
+        hand in pictures(info, "hand") + pictures(info, "fire")
+        for info in names.values()
+        if info.get("kind") == "gun"
+    )
+
+
+def read_ammo(mem):
+    """Ammo of the gun in your hand, or None (no chain can be read now). Ask only when you hold a gun."""
+    for start, offsets, last in AMMO_CHAINS:
+        try:
+            here = read_u32(mem, start)
+            for offset in offsets:
+                here = read_u32(mem, here + offset)
+            ammo = int.from_bytes(
+                read_bytes(mem, 4, here + last), "little", signed=True
+            )
+        except OSError:
+            continue
+        if 0 <= ammo <= AMMO_MOST:
+            return ammo
     return None
 
 

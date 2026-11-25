@@ -1,6 +1,52 @@
 {
-  "2": { "name": "Golf Club", "kind": "melee", "hand": "0x16", "rank": 3 },
-  "3": { "name": "Lead Pipe", "kind": "melee", "hand": "0xF", "rank": 2 },
-  "4": { "name": "Baseball Bat", "kind": "melee", "hand": "0x13", "rank": 1 },
-  "5": { "name": "Knife", "kind": "melee", "hand": "0x6D", "rank": 4 }
+  "0": {
+    "name": "M16",
+    "kind": "gun",
+    "hand": "0x39",
+    "fire": "0x28"
+  },
+  "1": {
+    "name": "Shotgun",
+    "kind": "gun",
+    "hand": "0x40",
+    "fire": "0x29"
+  },
+  "2": {
+    "name": "Golf Club",
+    "kind": "melee",
+    "hand": "0x16",
+    "rank": 3
+  },
+  "3": {
+    "name": "Lead Pipe",
+    "kind": "melee",
+    "hand": "0xF",
+    "rank": 2
+  },
+  "4": {
+    "name": "Baseball Bat",
+    "kind": "melee",
+    "hand": "0x13",
+    "rank": 1
+  },
+  "5": {
+    "name": "Knife",
+    "kind": "melee",
+    "hand": "0x6D",
+    "rank": 4
+  },
+  "6": {
+    "name": "Double Barrel",
+    "kind": "gun",
+    "hand": "0x64",
+    "fire": ["0x5f", "0x60"]
+  },
+  "10": {
+    "name": "Magnum",
+    "kind": "gun"
+  },
+  "18": {
+    "name": "Machete",
+    "kind": "melee"
+  }
 }

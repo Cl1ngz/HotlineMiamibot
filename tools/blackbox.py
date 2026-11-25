@@ -279,9 +279,7 @@ def read_inputs():
 
 
 def weapon_name(frame):
-    return (
-        "phantom" if frame == 0 else names.get(frame, {}).get("name", f"frame {frame}")
-    )
+    return names.get(frame, {}).get("name", f"frame {frame}")
 
 
 def describe(card, you, look, lines, table):

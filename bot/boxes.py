@@ -34,9 +34,10 @@ class Eyes:
     rescan_until: float = (
         0  # until when enemies are looked for on the whole shelf every frame
     )
-    # every frame: you, what you hold (your card +0xA0)
+    # every frame: you, what you hold (your card +0xA0), the ammo of the gun in your hand (None = can't read)
     you: tuple = (0, 0)
     hand: int = 0
+    ammo: int | None = None
     # enemies right now, {card: (x, y)} of those you see, and of all of them (also behind walls)
     still: list = field(default_factory=list)
     spots: dict = field(default_factory=dict)
