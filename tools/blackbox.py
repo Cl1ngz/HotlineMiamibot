@@ -56,7 +56,7 @@ from core.scenes import load_doors, scene_id
 from core.shelf import Shelf
 from core.stairs import find_car, find_stairs
 from core.walls import can_see, real_walls, wall_lines
-from core.weapons import find_goals, find_weapons, load_names
+from core.weapons import find_goals, find_weapons, held_gun, load_names, read_ammo
 
 SECTIONS = ("you", "inputs", "enemies", "items", "map", "near")
 TRIGGERS = ("death", "stuck", "key", "floor")
@@ -297,8 +297,11 @@ def describe(card, you, look, lines, table):
     who = "ENEMY" if is_enemy(mem, card, rules) else "body "
     see = "yes" if can_see(you, xy, lines) else "no "
     aimed = "  <- LOOK" if look is not None and math.dist(look, xy) < LOOK_NEAR else ""
+    layer, state = read_kind(mem, card, 0, 0x14), read_kind(mem, card, 0, 0x10)
+    done = read_u32(mem, card + 0xB4)
+    pic = read_u32(mem, card + 0xA0)  # his picture - what he holds?
     return (
-        f"{who} {card:#x} {spot(xy)} far {far:3.0f}  rule {rule}  layer {layer:#x}  +0x10 {state:#x}"
+        f"{who} {card:#x} {spot(xy)} far {far:3.0f}  rule {rule}  layer {layer:#x}  +0x10 {state:#x}  +0xA0 {pic:#x}"
         f"  +0xB4 {done}  {'table' if card in table else 'SHELF'}  see={see}{aimed}"
     )
 
@@ -506,6 +509,10 @@ try:
                 parts = [f"you {spot(you)}"]
                 if "you" in what:
                     parts.append(f"look {spot(look)}  hand {hand:#x}")
+                    if held_gun(hand, names):
+                        # what the bot reads as your ammo (? = the links can't be read right now)
+                        ammo = read_ammo(mem)
+                        parts.append(f"ammo {'?' if ammo is None else ammo}")
                 if "inputs" in what:
                     parts.append(f"keys {' '.join(sorted(held)) or '-'}")
                 details = []
