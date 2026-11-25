@@ -34,6 +34,7 @@ READY = {
 }
 READY_UNKNOWN = 0.45  # a weapon not measured yet = the slowest one
 SWING_WAIT = 0.6  # hold LMB this long at most for a swing - none came (a dialogue?): let go anyway
+GUN_WAIT = 0.3  # a loaded gun fires 0.03-0.13 s after the press - no fire picture by then = it's empty
 RELEASE_GAP = (
     0.15  # then keep it UP this long, so the game sees the next press as a new one
 )
@@ -86,17 +87,26 @@ def start_swing(hands, eyes, now):
     the game swings the moment the weapon is ready - if the button is down then."""
     press_left(game.mem, game.mem_rw)
     hands.rest_hand = eyes.hand
-    hands.release_at = now + SWING_WAIT
+    hands.release_at = now + (GUN_WAIT if eyes.gun else SWING_WAIT)
+    if eyes.gun:
+        hands.shots = hands.shots + 1 if eyes.target == hands.shot_at else 1
+        hands.shot_at = eyes.target
 
 
 def swing_started(hands, eyes, now):
     """Has the swing we hold the button for started? Then let go, and note when the weapon is ready again."""
     if hands.rest_hand is not None and eyes.hand != hands.rest_hand:
-        release_left(game.mem, game.mem_rw)
-        hands.release_at = None
-        hands.ready_at = now + READY.get(hands.rest_hand, READY_UNKNOWN)
-        hands.at_rest = hands.rest_hand
-        hands.rest_hand = None
+        swing_done(hands, now)
+
+
+def swing_done(hands, now):
+    """The swing (or shot) came: let go, and note when the weapon is ready again."""
+    release_left(game.mem, game.mem_rw)
+    hands.dry_presses = 0
+    hands.release_at = None
+    hands.ready_at = now + READY.get(hands.rest_hand, READY_UNKNOWN)
+    hands.at_rest = hands.rest_hand
+    hands.rest_hand = None
 
 
 def reach_of(eyes):
@@ -115,6 +125,7 @@ def let_go(hands, now):
         if hands.rest_hand is not None:
             # held for a swing that never came: stay up a moment, so the next press is a NEW one
             hands.next_swing = now + RELEASE_GAP
+            hands.dry_presses += 1
         hands.rest_hand = None
     if hands.space_up_at is not None and now >= hands.space_up_at:
         key_up(game.mem, game.mem_rw, KEY_SPACE)
@@ -143,22 +154,31 @@ def act(plan, eyes, hands, now):
                 hands.next_swing = now + EXEC_EVERY
                 hands.mounted_until = now + MOUNTED_FOR
         elif (
-            far < REACH + max(0.0, eyes.closing) * SWING_LEAD
+            far < reach_of(eyes)
             and hands.release_at is None
             and now >= hands.next_swing
             and (now >= hands.ready_at or eyes.hand == hands.at_rest)
             and (not eyes.behind_door or far < DOOR_SWING)
         ):
             start_swing(hands, eyes, now)
-
+    if plan.grab is not None and (
+        math.dist(plan.grab, eyes.you) < GRAB_REACH
+        and hands.right_up_at is None
+        and now >= hands.next_grab
+    ):
+        press_right(game.mem, game.mem_rw)
+        hands.right_up_at = now + HOLD
+        hands.next_grab = now + GRAB_COOLDOWN
     if (
         plan.throw
         and eyes.target is not None
         and math.dist(eyes.spots[eyes.target], eyes.you) < THROW_RANGE
         and hands.right_up_at is None
         and now >= hands.next_grab
+        and now >= hands.ready_at
     ):
-        # the crosshair is on him already (look_at above) - the gun flies there
+        # the crosshair is on him already (look_at above) - the gun flies there. Not while the last shot still
+        # plays: the game throws only after it, and by then that shot may have killed him (it flew elsewhere)
         press_right(game.mem, game.mem_rw)
         hands.right_up_at = now + HOLD
         hands.next_grab = now + GRAB_COOLDOWN
@@ -211,7 +231,13 @@ def act(plan, eyes, hands, now):
         click(hands, now)
         hands.next_swing = now + USE_EVERY
     # nothing to do and no enemy: a dialogue, the score screen - tap LMB now and then
-    if (plan.goal is None or not wants_to_walk) and eyes.target is None:
+    # (not while grabbing - the right button works there, LMB only punches the air; not with a gun - it'd fire)
+    if (
+        (plan.goal is None or not wants_to_walk)
+        and eyes.target is None
+        and plan.grab is None
+        and not eyes.gun
+    ):
         idle_tap(hands, now)
     else:
         hands.idle_since = None

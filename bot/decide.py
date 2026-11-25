@@ -8,7 +8,7 @@ from core.weapons import choose_weapon, held_rank
 
 from . import game
 from .boxes import Plan
-from .config import EMPTY_HANDS, GRAB_REACH, GUN_RANGE, REACH, THROW_RANGE
+from .config import EMPTY_HANDS, GRAB_REACH, GUN_RANGE, GUN_RANK, REACH, THROW_RANGE
 
 EXECUTE_WALK = 16  # walk this close to a lying enemy - inside act.py's EXECUTE_REACH (30), not at its edge
 ENEMY_SPEED = 180  # how fast an enemy runs
@@ -25,10 +25,11 @@ ARROW_WALK = 8
 SPOT_WALK = 8
 # a better weapon this many steps (16 each) of WALKING away, nobody in sight: swap - a chance on the way, not a trip
 SWAP_STEPS = 10
-# a gun with ammo beats every melee weapon; an empty one is worth nothing (swap it for anything, or throw it)
-GUN_RANK = 100
+# this much ammo or less: a gun lying around (full) beats yours - swap when nobody's in sight
+LOW_AMMO = 1
 # with a gun: walk up to this far from the enemy, then stand and shoot (a bit inside act.py's GUN_RANGE)
 SHOOT_FROM = 0.8 * GUN_RANGE
+MISSES = 2
 
 
 # ↖  ↑ ↗
@@ -69,9 +70,13 @@ def decide(eyes, hands, now):
 
     grab = None
     if eyes.gun:
-        held = (
-            0 if eyes.ammo == 0 else GUN_RANK
-        )  # ammo None = can't read it now: keep the gun
+        # ammo None = can't read it now: keep the gun. Almost empty: any gun lying around is better
+        if eyes.ammo == 0:
+            held = 0
+        elif eyes.ammo is not None and eyes.ammo <= LOW_AMMO:
+            held = GUN_RANK - 1
+        else:
+            held = GUN_RANK
     else:
         held = 0 if eyes.hand in EMPTY_HANDS else held_rank(eyes.hand, game.names)
     if held == 0:
@@ -140,13 +145,16 @@ def decide(eyes, hands, now):
             return Plan(
                 text=f"MEETING a charging enemy {enemy_far:3.0f} away, {eyes.closing:3.0f}/s"
             )
-        if eyes.gun and eyes.ammo != 0:
-            # a gun: no need to walk up to him - get within SHOOT_FROM and stand, act() fires (at lying ones too)
+        if eyes.gun and eyes.ammo != 0 and not eyes.lying:
+            # a gun: no need to walk up to him - get within SHOOT_FROM and stand, act() fires.
+            # A lying one can't be shot (bullets fly over him) - he gets executed like with fists.
+            # Still up after MISSES shots: something's in the way (an open door) - walk up, act() fires on the way
+            missed = hands.shot_at == eyes.target and hands.shots >= MISSES
             return Plan(
                 goal=target_xy,
-                close_enough=SHOOT_FROM,
-                text=f"SHOOTING at a {'LYING' if eyes.lying else 'standing'} enemy {enemy_far:3.0f} away, "
-                f"ammo {eyes.ammo}",
+                close_enough=REACH if missed else SHOOT_FROM,
+                text=f"SHOOTING at an enemy {enemy_far:3.0f} away, ammo {eyes.ammo}"
+                + (", missed - closer" if missed else ""),
             )
         return Plan(
             goal=target_xy,

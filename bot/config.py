@@ -16,3 +16,5 @@ EMPTY_HANDS = (0x1, 0x85)
 GRAB_REACH = 10
 # you moved less than this: you stand still (a dialogue holds you, or you push at something)
 MOVED_A_BIT = 2
+# a gun with ammo beats every melee weapon (ranks 1-4 in weapon_names.json); an empty one is worth nothing
+GUN_RANK = 100

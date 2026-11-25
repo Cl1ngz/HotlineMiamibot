@@ -10,9 +10,10 @@ from core.scenes import scene_id
 from core.shelf import Shelf
 from core.stairs import find_car, find_stairs
 from core.walls import WALL, crosses_box, door_boxes, real_walls, wall_lines
-from core.weapons import find_goals, find_weapons, held_gun, read_ammo
+from core.weapons import find_goals, find_weapons, gun_frame, held_gun, read_ammo
 
 from . import game
+from .config import GUN_RANK
 
 SCAN_EVERY = 0.25  # the slow part: enemies, weapons, stairs, the car
 WALLS_EVERY = 2.0  # walls, sofas and fake doors never move
@@ -26,12 +27,47 @@ CLOSING_EVERY = 0.1  # measure his run over this long (every frame is too jumpy:
 # stairs lit this soon after you came, this close to you, are the ones you came by - they lead BACK
 ARRIVAL_TIME = 1.5
 ARRIVAL_NEAR = 64
+# our empty gun lands this long after it left the hand (thrown ~1 s) - a new gun of its kind by then = it
+LANDS_IN = 2.0
+SAME_SPOT = 10  # a gun this close to where our empty one lies is that one
 JUMP = 100  # you moved this far in one frame: a new floor, or the floor again after a death
 # someone dropped out of the enemies: his NEW card can be on the shelf only - look at all of it this long
 RESCAN_FOR = 0.2
 # nobody left that we know of: look this many cards around the table, not the usual AROUND (64) - after a
 # restart the last enemies and the car can lie further (the bot didn't see who killed it, then not the car)
 WIDE = 1024
+
+
+def sort_weapons(eyes, floor, now):
+    """eyes.weapons [(x, y, rank)] from the weapons on the floor [(x, y, frame)]: melee with its rank, guns with
+    GUN_RANK - but not where our empty gun lies, and not a gun we don't know in the hand (no "hand" in
+    weapon_names.json: the bot couldn't tell it's a gun)."""
+    guns = {
+        (round(x), round(y), frame)
+        for x, y, frame in floor
+        if game.names.get(frame, {}).get("kind") == "gun"
+    }
+    if eyes.lost_gun is not None and now - eyes.lost_gun[1] > LANDS_IN:
+        eyes.lost_gun = None
+    if eyes.lost_gun is not None:
+        # a gun of its kind that wasn't on the floor at the last scan = ours, landed
+        eyes.empty_guns += [
+            (x, y)
+            for x, y, frame in guns - eyes.floor_guns
+            if frame == eyes.lost_gun[0]
+        ]
+    eyes.floor_guns = guns
+    eyes.weapons = []
+    for x, y, frame in floor:
+        info = game.names.get(frame, {})
+        if info.get("kind") == "melee":
+            eyes.weapons.append((x, y, info.get("rank", 0)))
+        elif (
+            info.get("kind") == "gun"
+            and info.get("hand")
+            and not any(math.dist((x, y), xy) < SAME_SPOT for xy in eyes.empty_guns)
+        ):
+            eyes.weapons.append((x, y, GUN_RANK))
 
 
 def see(eyes, now):
@@ -64,6 +100,7 @@ def see(eyes, now):
             scene = scene_id(walls)
             if scene != eyes.scene:
                 eyes.arrived_at = now
+                eyes.empty_guns = []
             eyes.scene = scene
             # lines you can't see through, every door (real or fake - pushing tells, walk() does it),
             # cells you can't stand in (walls + the doors we know never open here)
@@ -87,11 +124,7 @@ def see(eyes, now):
             eyes.came_by = None
         eyes.stairs = stairs
         eyes.car = find_car(shelf, records, scan_cards)
-        eyes.weapons = [
-            (x, y, game.names[frame].get("rank", 0))
-            for x, y, frame in find_weapons(shelf, shelf.cards)
-            if game.names.get(frame, {}).get("kind") == "melee"
-        ]
+        sort_weapons(eyes, find_weapons(shelf, shelf.cards), now)
         eyes.goals = find_goals(shelf, shelf.cards)
         eyes.next_scan = now + SCAN_EVERY
     # every frame: table cards that just became enemies (new, or a sitting one stood up) - now, not next scan
@@ -108,10 +141,27 @@ def see(eyes, now):
     if math.dist(you, eyes.you) > JUMP:
         eyes.arrived_at = now
     eyes.you = you
+    eyes.you_seen_at = now
+    eyes.hand = read_kind(shelf, me, 0, 0xA0)
+    old_gun, old_ammo = gun_frame(eyes.hand, game.names), eyes.ammo
     eyes.hand = read_kind(shelf, me, 0, 0xA0)
     # the ammo stays from the last gun after you throw it - it means something only with a gun in hand
     eyes.gun = held_gun(eyes.hand, game.names)
-    eyes.ammo = read_ammo(shelf) if eyes.gun else None
+    if not eyes.gun:
+        eyes.ammo = None
+    else:
+        # the links to the ammo can't always be read (None) - keep the last number then
+        ammo = read_ammo(shelf)
+        if ammo is not None:
+            eyes.ammo = ammo
+    # an empty gun just left your hand - thrown, or swapped for another weapon (one of its own kind too: then
+    # the ammo jumps up): it'll lie somewhere, empty
+    if (
+        old_ammo == 0
+        and old_gun is not None
+        and (gun_frame(eyes.hand, game.names) != old_gun or eyes.ammo)
+    ):
+        eyes.lost_gun = (old_gun, now)
 
     # still = enemies RIGHT NOW (a body drops out at once); someone dropped out -> rescan the shelf for a moment
     eyes.still = [card for card in eyes.enemies if is_enemy(shelf, card, game.rules)]
@@ -140,7 +190,9 @@ def see(eyes, now):
         nearest = min(near, key=lambda card: math.dist(near[card], eyes.you))
         pick = {nearest: near[nearest]}
     else:
-        pick = danger or eyes.spots
+        # a loaded gun kills a standing one with one click from afar: them first, the lying ones wait
+        shoot = eyes.threats if eyes.gun and eyes.ammo != 0 else {}
+        pick = danger or shoot or eyes.spots
     eyes.target = lockon.choose_target(pick, eyes.you)
     eyes.lying = (
         eyes.target is not None and read_kind(shelf, eyes.target, 0, 0x10) in KNOCKED

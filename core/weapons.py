@@ -89,13 +89,19 @@ def held_rank(hand, names):
     return None
 
 
+def gun_frame(hand, names):
+    """Which gun your hand shows, at rest or shooting ("hand" / "fire" in weapon_names.json): its frame, or None."""
+    for frame, info in names.items():
+        if info.get("kind") == "gun" and hand in pictures(info, "hand") + pictures(
+            info, "fire"
+        ):
+            return frame
+    return None
+
+
 def held_gun(hand, names):
-    """Does your hand show a gun - at rest or shooting ("hand" / "fire" of a gun in weapon_names.json)?"""
-    return any(
-        hand in pictures(info, "hand") + pictures(info, "fire")
-        for info in names.values()
-        if info.get("kind") == "gun"
-    )
+    """Does your hand show a gun - at rest or shooting?"""
+    return gun_frame(hand, names) is not None
 
 
 def read_ammo(mem):

@@ -17,7 +17,7 @@ import sys
 import time
 
 from bot import game
-from bot.act import act, click, idle_tap, let_go
+from bot.act import act, click, idle_tap, let_go, swing_done
 from bot.boxes import Eyes, Hands, Legs, Plan
 from bot.config import FPS
 from bot.decide import decide
@@ -36,19 +36,32 @@ from core.hands import (
 )
 from core.legs import hold
 
+# every shot hides your card for a frame - no player for less than this is no pause
+BLIP = 0.15
+# this many gun presses in a row that fired nothing = an empty gun (when its ammo can't be read)
+DRY_PRESSES = 2
+
 
 def pause(err, eyes, hands, legs, now):
-    """No player this frame. Sitting on an enemy -> keep hitting. Anything else -> forget the floor and wait."""
+    """No player this frame. Sitting on an enemy -> keep hitting. Just shot -> let go, keep aiming. Anything else -> forget the floor and wait."""
     if now < hands.mounted_until:
         # sitting on him: we can't see you, but we know what's going on - keep hitting
         if hands.release_at is None and now >= hands.next_swing:
             click(hands, now)
         status("MOUNTED - hitting")
         time.sleep(1 / FPS)  # not 0.2 s like a pause - every frame counts here
+    elif now - eyes.you_seen_at < BLIP:
+        # the shot hid you: let go of LMB now (a held M16 keeps firing), keep the crosshair on him
+        # (nobody writes it -> the game puts it back where the mouse is) and keep walking - forget nothing
+        if hands.rest_hand is not None:
+            swing_done(hands, now)
+        wait_frame(eyes, now)
+        return
     else:
         # a new floor, the menu, the score screen, a title card: forget the old floor, read the new one at once
         lockon.reset()
         eyes.still = []
+        eyes.empty_guns = []
         eyes.stairs = None
         eyes.car = None
         legs.learned.clear()
@@ -99,6 +112,11 @@ try:
                 share(Plan(text=f"{err} (paused)"), eyes, legs)
                 next_share = now + SHARE_EVERY
             continue  # skip the rest of the frame (only the loop can, see() can't)
+        if not eyes.gun:
+            hands.dry_presses = 0
+        elif eyes.ammo is None and hands.dry_presses >= DRY_PRESSES:
+            # no number for this gun, but presses fire nothing (no fire picture): it's empty
+            eyes.ammo = 0
         plan = decide(eyes, hands, now)
         try:
             act(plan, eyes, hands, now)

@@ -20,6 +20,11 @@ class Eyes:
     lines: list = field(default_factory=list)
     blocked: set = field(default_factory=set)
     weapons: list = field(default_factory=list)
+    # our empty guns: where they lie (never pick them up again), and the one that just left the hand
+    # (frame, when) - it lands a moment later; the guns on the floor at the last scan {(x, y, frame)}
+    empty_guns: list = field(default_factory=list)
+    lost_gun: tuple | None = None
+    floor_guns: set = field(default_factory=set)
     goals: list = field(default_factory=list)
     stairs: tuple | None = None
     car: tuple | None = None
@@ -39,6 +44,9 @@ class Eyes:
     hand: int = 0
     gun: bool = False
     ammo: int | None = None
+    you_seen_at: float = (
+        -math.inf
+    )  # when see() last found you (every shot hides your card for a frame)
     # enemies right now, {card: (x, y)} of those you see, and of all of them (also behind walls)
     still: list = field(default_factory=list)
     spots: dict = field(default_factory=dict)
@@ -72,6 +80,11 @@ class Hands:
     rest_hand: int | None = None
     ready_at: float = 0
     at_rest: int | None = None
+    # gun presses in a row that fired nothing (no fire picture) - tells an empty gun when the ammo can't be read
+    dry_presses: int = 0
+    # the guy we shoot at and how many shots he got - a hit kills, so more = something's in the way
+    shot_at: int | None = None
+    shots: int = 0
     idle_since: float | None = (
         None  # since when there's nothing to do (None = there is)
     )
