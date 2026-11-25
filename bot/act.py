@@ -14,7 +14,7 @@ from core.hands import (
 )
 
 from . import game
-from .config import EMPTY_HANDS, GRAB_REACH, MOVED_A_BIT, REACH
+from .config import EMPTY_HANDS, GRAB_REACH, GUN_RANGE, MOVED_A_BIT, REACH, THROW_RANGE
 
 HOLD = 0.15  # seconds a plain click / the right button is held
 COOLDOWN = (
@@ -28,6 +28,9 @@ READY = {
     0x16: 0.35,  # golf club
     0xF: 0.40,  # lead pipe
     0x16C: 0.35,  # the briefcase (one swing 0.27 s)
+    0x39: 0.13,  # M16 (a click = one bullet)
+    0x40: 0.40,  # Shotgun
+    0x64: 0.20,  # Double Barrel
 }
 READY_UNKNOWN = 0.45  # a weapon not measured yet = the slowest one
 SWING_WAIT = 0.6  # hold LMB this long at most for a swing - none came (a dialogue?): let go anyway
@@ -96,6 +99,14 @@ def swing_started(hands, eyes, now):
         hands.rest_hand = None
 
 
+def reach_of(eyes):
+    """How close the target must be for a press: a gun with ammo shoots far, an empty gun never (it only
+    clicks - plan.throw throws it), a melee weapon within REACH (a bit more when he runs at you)."""
+    if eyes.gun:
+        return GUN_RANGE if eyes.ammo != 0 else 0
+    return REACH + max(0.0, eyes.closing) * SWING_LEAD
+
+
 def let_go(hands, now):
     """Let go of every button whose time is up."""
     if hands.release_at is not None and now >= hands.release_at:
@@ -140,11 +151,14 @@ def act(plan, eyes, hands, now):
         ):
             start_swing(hands, eyes, now)
 
-    if plan.grab is not None and (
-        math.dist(plan.grab, eyes.you) < GRAB_REACH
+    if (
+        plan.throw
+        and eyes.target is not None
+        and math.dist(eyes.spots[eyes.target], eyes.you) < THROW_RANGE
         and hands.right_up_at is None
         and now >= hands.next_grab
     ):
+        # the crosshair is on him already (look_at above) - the gun flies there
         press_right(game.mem, game.mem_rw)
         hands.right_up_at = now + HOLD
         hands.next_grab = now + GRAB_COOLDOWN

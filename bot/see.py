@@ -110,7 +110,8 @@ def see(eyes, now):
     eyes.you = you
     eyes.hand = read_kind(shelf, me, 0, 0xA0)
     # the ammo stays from the last gun after you throw it - it means something only with a gun in hand
-    eyes.ammo = read_ammo(shelf) if held_gun(eyes.hand, game.names) else None
+    eyes.gun = held_gun(eyes.hand, game.names)
+    eyes.ammo = read_ammo(shelf) if eyes.gun else None
 
     # still = enemies RIGHT NOW (a body drops out at once); someone dropped out -> rescan the shelf for a moment
     eyes.still = [card for card in eyes.enemies if is_enemy(shelf, card, game.rules)]

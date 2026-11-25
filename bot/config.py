@@ -6,6 +6,10 @@ FPS = 60
 
 # an enemy this close gets hit (the logs: every swing at 23-39 killed, one even at 45)
 REACH = 38
+# a gun fires at an enemy you see this close (bullets fly further - lock-on sees 250)
+GUN_RANGE = 200
+# an empty gun gets thrown at an enemy this close (it knocks him down)
+THROW_RANGE = 150
 # your card +0xA0 when your hands are empty: at rest / punching
 EMPTY_HANDS = (0x1, 0x85)
 # this close to a weapon -> right click picks it up (the press test worked at 13)

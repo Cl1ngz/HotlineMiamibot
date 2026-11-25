@@ -34,9 +34,10 @@ class Eyes:
     rescan_until: float = (
         0  # until when enemies are looked for on the whole shelf every frame
     )
-    # every frame: you, what you hold (your card +0xA0), the ammo of the gun in your hand (None = can't read)
+    # every frame: you, what you hold (your card +0xA0), is it a gun, its ammo (None = no gun / can't read)
     you: tuple = (0, 0)
     hand: int = 0
+    gun: bool = False
     ammo: int | None = None
     # enemies right now, {card: (x, y)} of those you see, and of all of them (also behind walls)
     still: list = field(default_factory=list)
@@ -116,4 +117,5 @@ class Plan:
     goal: tuple | None = None
     close_enough: float = REACH
     use: bool = False  # at the goal tap LMB on it (what the arrow points at)
+    throw: bool = False  # throw what you hold at the target (an empty gun) once he's in THROW_RANGE
     text: str = ""  # the status line

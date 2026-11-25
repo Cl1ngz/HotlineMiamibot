@@ -8,7 +8,7 @@ from core.weapons import choose_weapon, held_rank
 
 from . import game
 from .boxes import Plan
-from .config import EMPTY_HANDS, GRAB_REACH, REACH
+from .config import EMPTY_HANDS, GRAB_REACH, GUN_RANGE, REACH, THROW_RANGE
 
 EXECUTE_WALK = 16  # walk this close to a lying enemy - inside act.py's EXECUTE_REACH (30), not at its edge
 ENEMY_SPEED = 180  # how fast an enemy runs
@@ -25,6 +25,10 @@ ARROW_WALK = 8
 SPOT_WALK = 8
 # a better weapon this many steps (16 each) of WALKING away, nobody in sight: swap - a chance on the way, not a trip
 SWAP_STEPS = 10
+# a gun with ammo beats every melee weapon; an empty one is worth nothing (swap it for anything, or throw it)
+GUN_RANK = 100
+# with a gun: walk up to this far from the enemy, then stand and shoot (a bit inside act.py's GUN_RANGE)
+SHOOT_FROM = 0.8 * GUN_RANGE
 
 
 # ↖  ↑ ↗
@@ -64,7 +68,12 @@ def decide(eyes, hands, now):
     time_left = hands.ready_at - now if hands.ready_at > now else 0
 
     grab = None
-    held = 0 if eyes.hand in EMPTY_HANDS else held_rank(eyes.hand, game.names)
+    if eyes.gun:
+        held = (
+            0 if eyes.ammo == 0 else GUN_RANK
+        )  # ammo None = can't read it now: keep the gun
+    else:
+        held = 0 if eyes.hand in EMPTY_HANDS else held_rank(eyes.hand, game.names)
     if held == 0:
         # empty hands: any weapon closer than the enemy
         grab = choose_weapon(
@@ -100,6 +109,14 @@ def decide(eyes, hands, now):
                 close_enough=0,
                 text=f"THROUGH THE DOOR to an enemy {enemy_far:3.0f} away",
             )
+        if eyes.gun and eyes.ammo == 0 and not eyes.lying:
+            # an empty gun only clicks: throw it at him (it knocks him down), then it's fists
+            return Plan(
+                goal=target_xy,
+                close_enough=THROW_RANGE,
+                throw=True,
+                text=f"THROWING the empty gun at an enemy {enemy_far:3.0f} away",
+            )
         # back off: he stands, the weapon isn't ready yet, and he'll be in reach before it is
         if (
             not eyes.lying
@@ -122,6 +139,14 @@ def decide(eyes, hands, now):
             # he runs at you: stand and let him come into your swing (act() presses early enough)
             return Plan(
                 text=f"MEETING a charging enemy {enemy_far:3.0f} away, {eyes.closing:3.0f}/s"
+            )
+        if eyes.gun and eyes.ammo != 0:
+            # a gun: no need to walk up to him - get within SHOOT_FROM and stand, act() fires (at lying ones too)
+            return Plan(
+                goal=target_xy,
+                close_enough=SHOOT_FROM,
+                text=f"SHOOTING at a {'LYING' if eyes.lying else 'standing'} enemy {enemy_far:3.0f} away, "
+                f"ammo {eyes.ammo}",
             )
         return Plan(
             goal=target_xy,
