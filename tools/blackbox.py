@@ -39,7 +39,14 @@ from collections import deque
 from datetime import datetime
 
 import core.hands as hands
-from core.enemies import find_aim, find_me_card, is_enemy, load_rules, matches
+from core.enemies import (
+    find_aim,
+    find_me_card,
+    is_enemy,
+    load_rules,
+    matches,
+    shelf_cards,
+)
 from core.hands import KEY_A, KEY_D, KEY_R, KEY_S, KEY_SPACE, KEY_W, KEYBOARD, follow
 from core.memory import (
     X_OFF,
@@ -412,7 +419,9 @@ try:
                 next_scan = now + SCAN_EVERY
             if now >= next_map:
                 walls = (
-                    real_walls(mem, records, mem.cards) if records else []
+                    real_walls(mem, records, shelf_cards(mem, records, 1024))
+                    if records
+                    else []
                 )  # every wall ONCE: (xy, box) pairs
                 lines = wall_lines([xy for xy, box in walls])
                 if "map" in what and records:

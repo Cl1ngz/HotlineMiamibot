@@ -31,23 +31,24 @@ def shelf_range(cards, around=AROUND):
 
 # where you were the last time find_me_card found you: picks the right card when several look like you
 me_last_xy = None
+# your card the last time - checked when the window around the table misses you (it's the same card all floor)
+me_last_card = None
+# not in the window: at the end of a level the table can move away from your card ("no player found" while
+# you stand there, "run to the car") - then look this many places both ways (helpers_for_me/far_cards found it)
+ME_WIDE = 4096
 
 
-def find_me_card(mem):
-    """Your card (layer 0x2C, picture 0x47), or None: the menu, loading, sitting on an enemy.
-    Several cards can look like you (a leftover from the floor you just left): the empty ones (card +0x4 = 0,
-    like the ghost enemies) go first, then the one closest to the crosshair - or, with no crosshair, to where
-    you were last time. With at least one card that looks like you, the answer is never None."""
-    global me_last_xy
-    cards = table_records(mem)
-    if not cards:
-        return None
+def me_cards(mem, cards, alive_only=False):
+    """{card: (x, y)} of these cards that look like you (layer 0x2C, picture 0x47).
+    alive_only: skip the empty leftovers (card +0x4 = 0) - far from the table there are copies from old floors.
+    """
     found = {}
-    for card in shelf_range(cards):
+    for card in cards:
         try:
             if (
                 read_kind(mem, card, 0, 0x14) == 0x2C
                 and read_kind(mem, card, 1, 0x10) == 0x47
+                and not (alive_only and read_kind(mem, card, 0, 0x4) == 0)
             ):
                 found[card] = (
                     read_double(mem, card + X_OFF),
@@ -55,6 +56,25 @@ def find_me_card(mem):
                 )
         except OSError:
             continue
+    return found
+
+
+def find_me_card(mem):
+    """Your card (layer 0x2C, picture 0x47), or None: the menu, loading, sitting on an enemy.
+    Several cards can look like you (a leftover from the floor you just left): the empty ones (card +0x4 = 0,
+    like the ghost enemies) go first, then the one closest to the crosshair - or, with no crosshair, to where
+    you were last time. With at least one card that looks like you, the answer is never None.
+    Not around the table: your card from last time, else the shelf ME_WIDE places both ways.
+    """
+    global me_last_xy, me_last_card
+    cards = table_records(mem)
+    if not cards:
+        return None
+    found = me_cards(mem, shelf_range(cards))
+    if not found and me_last_card is not None:
+        found = me_cards(mem, [me_last_card], alive_only=True)
+    if not found:
+        found = me_cards(mem, shelf_range(cards, ME_WIDE), alive_only=True)
     if not found:
         return None
     if len(found) > 1:
@@ -77,7 +97,7 @@ def find_me_card(mem):
             me = next(iter(found))
         else:
             me = min(found, key=lambda card: math.dist(found[card], point))
-    me_last_xy = found[me]
+    me_last_xy, me_last_card = found[me], me
     return me
 
 

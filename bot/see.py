@@ -104,8 +104,11 @@ def see(eyes, now):
             eyes.wall_cards = wall_cards
             eyes.next_walls = 0
         if now >= eyes.next_walls:
-            # every wall and sofa once, as (xy, box) - a new floor name = you just came
-            walls = real_walls(shelf, records, shelf.cards)
+            # every wall and sofa once, as (xy, box) - a new floor name = you just came. From the shelf WIDE
+            # around the table: at the end of a level the table moves away and the usual window held only
+            # half the walls (63 of 115 by the metro car - the way went through the holes)
+            around = shelf_cards(shelf, records, WIDE)
+            walls = real_walls(shelf, records, around)
             scene = scene_id(walls)
             if scene != eyes.scene:
                 eyes.arrived_at = now
@@ -114,7 +117,7 @@ def see(eyes, now):
             # lines you can't see through, every door (real or fake - pushing tells, walk() does it),
             # cells you can't stand in (walls + the doors we know never open here)
             eyes.lines = wall_lines([xy for xy, box in walls])
-            eyes.doors = door_boxes(shelf, shelf.cards)
+            eyes.doors = door_boxes(shelf, around)
             boxes = [box for xy, box in walls] + [
                 tuple(box) for box in game.fake_doors.get(scene, [])
             ]
