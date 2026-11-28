@@ -60,7 +60,10 @@ def seen_cells(xy, rows, blocked):
         x1 - gx
     )  # side of the look each end is on (N x L)
     end2 = (px - gx) * (y2 - gy) - (py - gy) * (x2 - gx)
-    cut = (him * cell < 0) & (end1 * end2 < 0)
+    # <= 0, not < 0 like crosses(): a look right through an END of a line is cut too. Two wall pieces meet
+    # at such a point, and the cells' middles lie on the same 16 grid as the pieces - a man standing on it
+    # (the logs: a Double Barrel at (336, 400)) "saw" through solid walls along those looks
+    cut = (him * cell < 0) & (end1 * end2 <= 0)
     free = ~cut.any(axis=1)  # no line cuts the look at this cell
     return {c for c, ok in zip(cells, free) if ok}
 

@@ -14,7 +14,15 @@ from core.hands import (
 )
 
 from . import game
-from .config import EMPTY_HANDS, GRAB_REACH, GUN_RANGE, MOVED_A_BIT, REACH, THROW_RANGE
+from .config import (
+    EMPTY_HANDS,
+    GRAB_EMPTY,
+    GRAB_REACH,
+    GUN_RANGE,
+    MOVED_A_BIT,
+    REACH,
+    THROW_RANGE,
+)
 
 HOLD = 0.15  # seconds a plain click / the right button is held
 COOLDOWN = (
@@ -162,8 +170,10 @@ def act(plan, eyes, hands, now):
             and (not eyes.behind_door or far < DOOR_SWING)
         ):
             start_swing(hands, eyes, now)
+    # empty hands: press from further - too far the press does nothing (with a weapon in hand it'd THROW it)
+    reach = GRAB_EMPTY if eyes.hand in EMPTY_HANDS else GRAB_REACH
     if plan.grab is not None and (
-        math.dist(plan.grab, eyes.you) < GRAB_REACH
+        math.dist(plan.grab, eyes.you) < reach
         and hands.right_up_at is None
         and now >= hands.next_grab
     ):

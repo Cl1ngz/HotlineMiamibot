@@ -195,12 +195,14 @@ def decide(eyes, hands, now):
                     close_enough=0,
                     text=f"HIDING from {len(gunmen)} gunman(s)",
                 )
+    # in cover: let them come here (act() still swings at anyone in reach). A gunman sees you = it's no cover:
+    # run at him or throw, below (the logs: 0.4 s standing 74 from a Double Barrel who saw the bot)
     if (
         not armed
         and now < hold_until
+        and not gunmen
         and not (target_xy is not None and enemy_far < FIGHT_NEAR)
     ):
-        # in cover: let them come here (act() still swings at anyone in reach)
         return Plan(text=f"HOLDING cover, {hold_until - now:.1f} s")
 
     if target_xy is not None:
@@ -262,17 +264,19 @@ def decide(eyes, hands, now):
         )
 
     if eyes.hidden:
-        # no loaded gun: the ones without a gun first - a gunman shoots you before you get to him
-        calm = {
-            card: xy
-            for card, xy in eyes.hidden.items()
-            if card not in eyes.shooters and card not in eyes.sitters
-        }
-        pool = calm if calm and not armed else eyes.hidden
         # not the ones walk() found no way to (behind glass...) - unless there's nobody else
         pool = {
-            card: xy for card, xy in pool.items() if can_reach(eyes, xy, now)
-        } or pool
+            card: xy for card, xy in eyes.hidden.items() if can_reach(eyes, xy, now)
+        } or eyes.hidden
+        # no loaded gun: the ones without a gun first - a gunman shoots you before you get to him
+        # (of the ones you can get to: one you can't get to doesn't hold you up, the gunmen are next)
+        calm = {
+            card: xy
+            for card, xy in pool.items()
+            if card not in eyes.shooters and card not in eyes.sitters
+        }
+        if calm and not armed:
+            pool = calm
         card = min(pool, key=lambda card: math.dist(pool[card], you))
         goal = pool[card]
         if not armed and card in eyes.shooters:
@@ -296,10 +300,14 @@ def decide(eyes, hands, now):
                     )
             return Plan(
                 goal=goal,
+                close_enough=0,
                 text=f"GOING IN at a gunman behind a wall {math.dist(goal, you):3.0f} away",
             )
+        # close_enough 0: REACH through a wall isn't close - walk the way round, he comes in sight on it (the logs:
+        # the bot stopped 34 from a pipe guy behind a wall, stood there, he came round and hit first)
         return Plan(
             goal=goal,
+            close_enough=0,
             text=f"HUNTING an enemy behind a wall {math.dist(goal, you):3.0f} away",
         )
     arrow = eyes.arrow
