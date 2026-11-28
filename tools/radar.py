@@ -15,6 +15,7 @@
 #   red triangle     = what the red arrow points at
 #   cyan cross, dots = the bot's goal and the way it walks there   (thin cyan line = its target)
 #   grey / yellow dots = things still where the floor started / things that moved
+#   dark red cells     = the danger map: what the gunmen (and the sitters) see
 #
 #   python -m tools.radar             on Hyprland's top layer, in the bottom-right corner
 #   python -m tools.radar --window    in a normal window
@@ -39,6 +40,7 @@ from core.memory import (
     read_kind,
     table_cards,
 )
+from core.path import CELL, middle  # noqa: E402
 from core.shelf import Shelf  # noqa: E402
 from core.stairs import find_car, find_stairs  # noqa: E402
 from core.walls import can_see, real_walls, wall_lines  # noqa: E402
@@ -234,6 +236,15 @@ def on_draw(widget, cr):
 
     def to_radar(xy):
         return MARGIN + (xy[0] - min_x) * zoom, TOP + MARGIN + (xy[1] - min_y) * zoom
+
+    # the danger map: dark red cells - a gunman sees them (the bot without a loaded gun walks round them)
+    if bot is not None and bot.get("fire"):
+        cr.set_source_rgba(0.8, 0.1, 0.1, 0.35)
+        for cell in bot["fire"]:
+            x, y = middle(cell)
+            sx, sy = to_radar((x - CELL / 2, y - CELL / 2))
+            cr.rectangle(sx, sy, CELL * zoom, CELL * zoom)
+        cr.fill()
 
     # walls: grey lines
     cr.set_source_rgb(0.45, 0.45, 0.5)

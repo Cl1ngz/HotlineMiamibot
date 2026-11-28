@@ -31,6 +31,7 @@ READY = {
     0x39: 0.13,  # M16 (a click = one bullet)
     0x40: 0.40,  # Shotgun
     0x64: 0.20,  # Double Barrel
+    0x14A: 0.20,  # Double Barrel too (its other hand picture, fires 0x150 / 0x151)
 }
 READY_UNKNOWN = 0.45  # a weapon not measured yet = the slowest one
 SWING_WAIT = 0.6  # hold LMB this long at most for a swing - none came (a dialogue?): let go anyway

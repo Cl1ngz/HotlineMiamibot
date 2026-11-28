@@ -24,6 +24,8 @@ def share(plan, eyes, legs):
         "arrow": eyes.arrow,
         "came_by": eyes.came_by,
         "target": eyes.spots.get(eyes.target),
+        # the danger map: the cells a gunman sees (16 x 16, core/path.py)
+        "fire": list(eyes.fire),
     }
     with open(NOW_FILE + ".tmp", "w") as f:
         json.dump(data, f)

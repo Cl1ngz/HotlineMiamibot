@@ -2,6 +2,7 @@
 # bot/decide.py - decide(): what we want this frame, a Plan. Looks only at Eyes (and Hands) - never at the game
 import math
 
+from core.danger import corner, cover
 from core.path import cell_of, walk_steps
 from core.walls import can_see
 from core.weapons import choose_weapon, held_rank
@@ -23,6 +24,10 @@ BACK_ROOM = (
 # walk this close to what the red arrow points at / to a spot shown with tools/scene_tool.py (then tap LMB)
 ARROW_WALK = 8
 SPOT_WALK = 8
+# an arrow still there after this many taps at what it points at (act.py: LMB, then RMB) isn't ours to use -
+# leave it on this floor (the logs: an arrow at (261, 150) on two floors, the bot went back and forth)
+ARROW_TRIES = 8
+SAME_ARROW = 24  # an arrow this close to a left one points at the same thing
 # a better weapon this many steps (16 each) of WALKING away, nobody in sight: swap - a chance on the way, not a trip
 SWAP_STEPS = 10
 # someone in sight: a gun this much closer than him (0.5 = half his distance) is still worth grabbing first
@@ -32,6 +37,25 @@ LOW_AMMO = 1
 # with a gun: walk up to this far from the enemy, then stand and shoot (a bit inside act.py's GUN_RANGE)
 SHOOT_FROM = 0.8 * GUN_RANGE
 MISSES = 2
+# no loaded gun and a gunman sees you: closer than this run at him (the logs: he shoots ~0.3 s after he sees
+# you, you run ~180/s), further - throw what you hold at him (it knocks him down), or hide
+CLOSE_IN = 80
+# a gunman behind a wall: wait round the corner of his room this long for him to come, then go in anyway
+# (some never move). A sitter never comes - no waiting for him
+AMBUSH_WAIT = 3.0
+CORNER_NEAR = 12  # this close to the corner = you're there
+# no loaded gun and a gunman sees you: out of his sight first (the logs, level 4: 13 deaths fighting a knife guy
+# in the middle of the room while a Double Barrel 60-110 away watched) - unless one without a gun is this close
+# (he hits you while you walk away). In cover stand this long: the ones without a gun come to you there
+FIGHT_NEAR = 50
+HOLD_COVER = 1.5
+
+# the gunman we wait for by his corner, and since when we stand there (inf = not there yet) - kept between
+# frames, like lockon.target
+waiting_for = None
+waiting_since = math.inf
+hold_until = 0.0  # in cover until then (HOLD_COVER after the last HIDING)
+left_arrows = []  # (floor, xy) of the arrows we tapped ARROW_TRIES times for nothing
 
 
 # ↖  ↑ ↗
@@ -62,12 +86,33 @@ def back_off_point(you, threats, blocked, lines):
     return best
 
 
+def can_reach(eyes, xy, now):
+    """Did walk() find a way there lately (or never try)? Not: behind glass, a door that never opens."""
+    return eyes.no_way.get(cell_of(xy), 0) < now
+
+
+def waited(card, there, now):
+    """Have we waited AMBUSH_WAIT by this gunman's corner? there = we stand at it now (the clock starts)."""
+    global waiting_for, waiting_since
+    if waiting_for != card:
+        waiting_for, waiting_since = card, math.inf
+    if there:
+        waiting_since = min(waiting_since, now)
+    return now - waiting_since > AMBUSH_WAIT
+
+
 def decide(eyes, hands, now):
     """What we want this frame -> a Plan. Looks at eyes (and hands: when the weapon is ready), never at the game.
     The first that fits wins: a weapon (empty hands) or the level goal (floor clear), the enemy you see,
     an enemy behind a wall, the red arrow, the car, the stairs, a shown spot."""
+    global hold_until
     you = eyes.you
+    # a loaded gun (ammo None = can't read it now: loaded)
+    armed = eyes.gun and eyes.ammo != 0
     target_xy = eyes.spots.get(eyes.target)
+    if target_xy is not None and not armed and not can_reach(eyes, target_xy, now):
+        target_xy = None  # behind glass, no way round: a gun shoots through it, a bat doesn't - someone else
+    weapons = [w for w in eyes.weapons if can_reach(eyes, w[:2], now)]
     enemy_far = math.dist(target_xy, you) if target_xy is not None else math.inf
     time_left = hands.ready_at - now if hands.ready_at > now else 0
 
@@ -85,13 +130,13 @@ def decide(eyes, hands, now):
     if held == 0:
         # empty hands: any weapon closer than the enemy
         grab = choose_weapon(
-            [(x, y) for x, y, rank in eyes.weapons], you, enemy_far, eyes.lines
+            [(x, y) for x, y, rank in weapons], you, enemy_far, eyes.lines
         )
     elif held is not None:
         # a weapon in hand: a better one a few steps of WALKING away (not "in sight": by a wall in-sight flips
         # on and off as you walk, and the bot turned back and forth). Someone in sight: only a gun, and only
         # if it's much closer than him - grab it, then shoot him
-        for x, y, rank in sorted(eyes.weapons, key=lambda w: math.dist(w[:2], you)):
+        for x, y, rank in sorted(weapons, key=lambda w: math.dist(w[:2], you)):
             if (
                 rank > held
                 and (
@@ -115,6 +160,48 @@ def decide(eyes, hands, now):
             close_enough=GRAB_REACH,
             text=f"GRABBING {math.dist(grab, you):3.0f} away",
         )
+
+    # who sees you: the gunmen and the sitters whose sight has your cell (glass hides you - they don't shoot
+    # through it). No loaded gun: he shoots before you get to him
+    seen_by = [
+        card for card, (his, cells) in eyes.sight.items() if cell_of(you) in cells
+    ]
+    gunmen = [card for card in seen_by if card in eyes.shooters]
+    target_sees = eyes.target in seen_by
+    if not armed and seen_by:
+        if target_sees and not eyes.lying and CLOSE_IN < enemy_far < THROW_RANGE:
+            if not eyes.gun and held:
+                # throw what you hold at him: it knocks him down
+                return Plan(
+                    goal=target_xy,
+                    close_enough=THROW_RANGE,
+                    throw=True,
+                    text=f"THROWING at a gunman {enemy_far:3.0f} away",
+                )
+        # out of their sight: the ones without a gun follow you there, fight them where nobody shoots you.
+        # Not when: one without a gun is about to hit you, the gunman is close (run at him, below), it's the
+        # gunman we waited for (we go in at him now), only a sitter sees you (he never comes - you go to him)
+        melee_close = (
+            target_xy is not None and not target_sees and enemy_far < FIGHT_NEAR
+        )
+        gunman_close = target_sees and enemy_far <= CLOSE_IN
+        went_in = waiting_for in gunmen and now - waiting_since > AMBUSH_WAIT
+        if gunmen and not (melee_close or gunman_close or went_in):
+            spot = cover(you, eyes.fire, eyes.blocked)
+            if spot is not None:
+                hold_until = now + HOLD_COVER
+                return Plan(
+                    goal=spot,
+                    close_enough=0,
+                    text=f"HIDING from {len(gunmen)} gunman(s)",
+                )
+    if (
+        not armed
+        and now < hold_until
+        and not (target_xy is not None and enemy_far < FIGHT_NEAR)
+    ):
+        # in cover: let them come here (act() still swings at anyone in reach)
+        return Plan(text=f"HOLDING cover, {hold_until - now:.1f} s")
 
     if target_xy is not None:
         if eyes.behind_door and not eyes.lying:
@@ -175,17 +262,70 @@ def decide(eyes, hands, now):
         )
 
     if eyes.hidden:
-        goal = min(eyes.hidden.values(), key=lambda xy: math.dist(xy, you))
+        # no loaded gun: the ones without a gun first - a gunman shoots you before you get to him
+        calm = {
+            card: xy
+            for card, xy in eyes.hidden.items()
+            if card not in eyes.shooters and card not in eyes.sitters
+        }
+        pool = calm if calm and not armed else eyes.hidden
+        # not the ones walk() found no way to (behind glass...) - unless there's nobody else
+        pool = {
+            card: xy for card, xy in pool.items() if can_reach(eyes, xy, now)
+        } or pool
+        card = min(pool, key=lambda card: math.dist(pool[card], you))
+        goal = pool[card]
+        if not armed and card in eyes.shooters:
+            # a gunman behind a wall: walking in, he'd see you first - wait for him round the corner of his
+            # room (he comes, or you go in from there: throwing distance, the shortest way in his sight)
+            spot = corner(goal, eyes.fire, eyes.blocked)
+            if spot is not None and can_reach(eyes, spot, now):
+                there = math.dist(spot, you) <= CORNER_NEAR
+                if not waited(card, there, now):
+                    if not there:
+                        return Plan(
+                            goal=spot,
+                            close_enough=CORNER_NEAR,
+                            text=f"TO THE CORNER by a gunman {math.dist(goal, you):3.0f} away",
+                        )
+                    return Plan(
+                        goal=spot,
+                        close_enough=CORNER_NEAR,
+                        text=f"WAITING by the corner for a gunman, "
+                        f"{AMBUSH_WAIT - (now - waiting_since):.1f} s",
+                    )
+            return Plan(
+                goal=goal,
+                text=f"GOING IN at a gunman behind a wall {math.dist(goal, you):3.0f} away",
+            )
         return Plan(
             goal=goal,
             text=f"HUNTING an enemy behind a wall {math.dist(goal, you):3.0f} away",
         )
-    if eyes.arrow is not None:
+    arrow = eyes.arrow
+    if arrow is not None and (
+        not can_reach(eyes, arrow, now)
+        or any(
+            floor == eyes.scene and math.dist(arrow, xy) < SAME_ARROW
+            for floor, xy in left_arrows
+        )
+    ):
+        arrow = None  # no way there, or tapped for nothing: the car, the stairs...
+    if (
+        arrow is not None
+        and hands.use_goal is not None
+        and math.dist(hands.use_goal, arrow) < SAME_ARROW
+        and hands.use_taps >= ARROW_TRIES
+    ):
+        left_arrows.append((eyes.scene, arrow))
+        print(f"\nTHE ARROW at {arrow} stays after {ARROW_TRIES} taps - leaving it")
+        arrow = None
+    if arrow is not None:
         return Plan(
-            goal=eyes.arrow,
+            goal=arrow,
             close_enough=ARROW_WALK,
             use=True,
-            text=f"TO THE ARROW {math.dist(eyes.arrow, you):3.0f} away",
+            text=f"TO THE ARROW {math.dist(arrow, you):3.0f} away",
         )
     if eyes.car is not None:
         # the chapter is done: drive away (beats any stairs - some stay lit)

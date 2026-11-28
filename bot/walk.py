@@ -3,7 +3,7 @@
 import math
 
 from core.legs import hold, keys_toward, next_point
-from core.path import blocked_cells, cell_of, find_path
+from core.path import CELL, blocked_cells, cell_of, find_path
 from core.scenes import save_doors
 from core.walls import can_see, door_at
 
@@ -31,6 +31,18 @@ SETTLE = 3
 # (not after one push: a dialogue stops you at a real door too); two bumps closer than DOOR_AGAIN = one try
 DOOR_TRIES = 2
 DOOR_AGAIN = 4
+# going straight at a close goal and not moving for BUMP_AFTER: something the walls don't know is in the way
+# (the logs: 2 s holding A at (200, 229), then dead) - learn its cell like a bump, take the path this long
+STRAIGHT_OFF = 1.0
+# the way doesn't get to the goal (it's behind glass, a door that never opens): decide() leaves it this long
+NO_WAY_FOR = 5
+# this long closer than STRAIGHT to a weapon and it's still not yours: it lies where you can't get (a counter,
+# a wall's edge - the logs: 20 s pushing D at an M16 15 away, 8 bumps round a gun by a wall) - leave it
+GRAB_TRY = 2.0
+# a cell a gunman sees (eyes.fire) costs like this many free ones - the way goes round his sight if that's
+# not much longer, and comes into it as late as it can. With a loaded gun only the cells two of them see
+# (eyes.crossfire): you shoot one first (~0.1 s, he needs ~0.3), not two - a shotgun pumps 0.4 s
+FIRE_COST = 6
 
 
 def fake_door(eyes, legs, door):
@@ -61,9 +73,15 @@ def walk(plan, eyes, legs, now):
     )
     keys = set()
     point = None  # the path point we push toward this frame (None = not walking along a path)
+    straight = False  # going straight at the goal this frame (no path)
     if goal is not None and math.dist(goal, you) > plan.close_enough:
-        if math.dist(goal, you) < STRAIGHT and can_see(you, goal, eyes.lines):
+        if (
+            math.dist(goal, you) < STRAIGHT
+            and can_see(you, goal, eyes.lines)
+            and now >= legs.straight_off
+        ):
             keys = keys_toward(you, goal)  # the last bit: straight there, no path
+            straight = True
         else:
             if now >= legs.next_plan or legs.planned_at < eyes.arrived_at:
                 # forget the old bumps, walk around the rest
@@ -81,7 +99,15 @@ def walk(plan, eyes, legs, now):
                         y + STAIRS_SIZE,
                     )
                     avoid = avoid | blocked_cells([box])
-                legs.path = find_path(you, goal, avoid | set(legs.learned))
+                fire = eyes.crossfire if eyes.gun and eyes.ammo != 0 else eyes.fire
+                legs.path = find_path(
+                    you,
+                    goal,
+                    avoid | set(legs.learned),
+                    costly=fire,
+                    extra=FIRE_COST,
+                    area=eyes.area,
+                )
                 # the bumps (not the fake doors - they stay for ever, until = inf)
                 bumps = {
                     cell for cell, until in legs.learned.items() if until != math.inf
@@ -89,7 +115,14 @@ def walk(plan, eyes, legs, now):
                 if bumps and cell_of(legs.path[-1]) != cell_of(goal):
                     # the goal can't be reached - because of the bumps? A bump may make you walk AROUND
                     # something, never cut the goal off (a frozen game looks like a bump too): forget them
-                    free = find_path(you, goal, avoid | (set(legs.learned) - bumps))
+                    free = find_path(
+                        you,
+                        goal,
+                        avoid | (set(legs.learned) - bumps),
+                        costly=fire,
+                        extra=FIRE_COST,
+                        area=eyes.area,
+                    )
                     if cell_of(free[-1]) == cell_of(goal):
                         legs.path = free
                         legs.learned = {
@@ -100,14 +133,19 @@ def walk(plan, eyes, legs, now):
                         print(
                             "\nthe bumps cut the goal off - forgot them, taking the way through"
                         )
+                # no way to the goal (the way ends at the cell closest to it): tell decide() to leave it a while
+                legs.reaches = cell_of(legs.path[-1]) == cell_of(goal)
+                if not legs.reaches:
+                    eyes.no_way[cell_of(goal)] = now + NO_WAY_FOR
                 legs.next_plan = now + REPLAN
                 legs.planned_at = now
             if legs.path is not None:
                 point = next_point(legs.path, you)
-                if point is None:
-                    # the end of the path (the cell closest to the goal): the last bit straight at the goal
+                if point is None and legs.reaches:
+                    # the end of the path (the goal's cell): the last bit straight at the goal
                     point = goal
-                keys = keys_toward(you, point)
+                # (the end of a way that doesn't get there: stand - pushing on goes into the glass for ever)
+                keys = keys_toward(you, point) if point is not None else set()
             else:
                 keys = keys_toward(you, goal)
     # bumped into something? walking along the path, but you haven't moved for BUMP_AFTER
@@ -139,4 +177,29 @@ def walk(plan, eyes, legs, now):
         legs.next_plan = now
         legs.pushed_from, legs.pushed_since = you, now
         print(f"\nBUMPED into something at {point} - going around it")
+    # going straight at the goal and not moving: the same, for the cell one step toward it
+    if not straight or math.dist(you, legs.straight_from) > MOVED_A_BIT:
+        legs.straight_from, legs.straight_since = you, now
+    elif now - legs.straight_since > BUMP_AFTER and settled:
+        far = math.dist(goal, you)
+        step = (
+            you[0] + (goal[0] - you[0]) / far * CELL,
+            you[1] + (goal[1] - you[1]) / far * CELL,
+        )
+        legs.learned[cell_of(step)] = now + FORGET_AFTER
+        legs.straight_off = now + STRAIGHT_OFF
+        legs.next_plan = now
+        legs.straight_from, legs.straight_since = you, now
+        print(f"\nBUMPED going straight at {goal} - taking the way round")
+    # by a weapon for GRAB_TRY and it's still lying there (pushing at it, bumping round it, pressing too far)
+    if (
+        plan.grab is None
+        or plan.grab != legs.grab_at
+        or math.dist(plan.grab, you) > STRAIGHT
+    ):
+        legs.grab_at, legs.grab_since = plan.grab, now
+    elif now - legs.grab_since > GRAB_TRY:
+        eyes.out_of_reach.append(plan.grab)
+        legs.grab_at, legs.grab_since = None, now
+        print(f"\nCAN'T GET the weapon at {plan.grab} - leaving it")
     legs.held = hold(game.mem, game.mem_rw, keys, legs.held)

@@ -44,9 +44,16 @@
   "6": {
     "name": "Double Barrel",
     "kind": "gun",
-    "hand": "0x64",
-    "fire": ["0x5f", "0x60"],
+    "hand": ["0x64", "0x14a"],
+    "fire": ["0x5f", "0x60", "0x150", "0x151"],
     "enemy": ["0x5e"]
+  },
+  "7": {
+    "name": "Gun 7 (name unknown)",
+    "kind": "gun",
+    "hand": "0x89",
+    "fire": "0x8b",
+    "enemy": ["0x8a"]
   },
   "10": {
     "name": "Magnum",

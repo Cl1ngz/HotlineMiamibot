@@ -84,7 +84,7 @@ def pictures(info, key):
 def held_rank(hand, names):
     """Rank of the weapon in your hand (card +0xA0 at rest), or None: not a weapon we know (mid-swing, a gun...)."""
     for info in names.values():
-        if "hand" in info and int(info["hand"], 16) == hand:
+        if hand in pictures(info, "hand"):
             return info.get("rank", 0)
     return None
 

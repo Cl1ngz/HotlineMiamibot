@@ -4,6 +4,8 @@
 import math
 from dataclasses import dataclass, field
 
+from core.danger import line_rows
+
 from .config import REACH
 
 
@@ -25,6 +27,10 @@ class Eyes:
     empty_guns: list = field(default_factory=list)
     lost_gun: tuple | None = None
     floor_guns: set = field(default_factory=set)
+    # weapons walk() couldn't get to (pushed at them, didn't move): where they lie - skipped on this floor
+    out_of_reach: list = field(default_factory=list)
+    # {cell: until when} goals walk() found no way to (behind glass, a door that never opens) - decide() leaves them
+    no_way: dict = field(default_factory=dict)
     goals: list = field(default_factory=list)
     stairs: tuple | None = None
     car: tuple | None = None
@@ -32,8 +38,16 @@ class Eyes:
     # points at, when you came, the stairs you came by (they lead back)
     scene: str = ""
     wall_cards: int = -1
+    # the cards that are walls or doors (see.py: found once a floor, then only those are read)
+    box_cards: list = field(default_factory=list)
+    area: tuple | None = (
+        None  # the floor's box in cells - the ways stay in it (core/path.py area_of)
+    )
     doors: list = field(default_factory=list)
     arrow: tuple | None = None
+    arrow_seen_at: float = (
+        -math.inf
+    )  # when the arrow was found last (see.py keeps it ARROW_KEEP)
     arrived_at: float = -math.inf
     came_by: tuple | None = None
     rescan_until: float = (
@@ -64,6 +78,14 @@ class Eyes:
     # last frame's spots and when - to see how they move
     last_spots: dict = field(default_factory=dict)
     last_seen_at: float = 0.0
+    # the danger map: {card: (x, y)} of the standing gunmen and the sitters (weapon unknown), seen or not,
+    # what each one sees {card: (his cell, {cells})}, all those cells together, the wall lines for numpy
+    shooters: dict = field(default_factory=dict)
+    sitters: dict = field(default_factory=dict)
+    sight: dict = field(default_factory=dict)
+    fire: set = field(default_factory=set)
+    crossfire: set = field(default_factory=set)  # the cells two or more of them see
+    line_rows: object = field(default_factory=lambda: line_rows([]))
 
 
 @dataclass
@@ -125,6 +147,14 @@ class Legs:
     # the arrival the legs know about (a copy of eyes.arrived_at) and where you stood then
     arrived_at: float = -math.inf
     arrived_from: tuple = (0, 0)
+    reaches: bool = True  # the last way found gets to the goal
+    # going straight at a close goal: from where and since when you haven't moved, no straight until then
+    straight_from: tuple = (0, 0)
+    straight_since: float = 0
+    straight_off: float = 0
+    # the weapon we're by (closer than walk.py's STRAIGHT) and since when (too long = you can't get it)
+    grab_at: tuple | None = None
+    grab_since: float = 0
 
 
 @dataclass
@@ -136,5 +166,6 @@ class Plan:
     goal: tuple | None = None
     close_enough: float = REACH
     use: bool = False  # at the goal tap LMB on it (what the arrow points at)
-    throw: bool = False  # throw what you hold at the target (an empty gun) once he's in THROW_RANGE
+    # throw what you hold at the target once he's in THROW_RANGE (an empty gun, a bat at a gunman)
+    throw: bool = False
     text: str = ""  # the status line

@@ -31,14 +31,18 @@
 #   python -m tools.blackbox --range 400           enemies further away too
 #   python -m tools.blackbox --save-on death,key   save only on these (death, stuck, key, floor)
 import argparse
+import json
 import math
 import os
+import re
+import signal
 import subprocess
 import time
 from collections import deque
 from datetime import datetime
 
 import core.hands as hands
+from bot.share import NOW_FILE
 from core.enemies import (
     find_aim,
     find_me_card,
@@ -137,6 +141,7 @@ WALKING = {"W", "A", "S", "D"}
 ME_LAYER, AIM_LAYER, WALL_LAYER = 0x2C, 0xAF, 0x9
 LOOK_NEAR = 8  # the look is this close to an enemy -> your character looks at him
 ITEM_NEAR = 60  # weapons appearing / disappearing this close to you are events (far ones are noise)
+BOT_OLD = 1.0  # hmbot's status file older than this = the bot doesn't run (like tools/radar.py)
 # a weapon showing up this close to where an enemy just dropped out (died / knocked down), this soon = his
 DROP_NEAR, DROP_TIME = 40, 1.5
 STUCK_FOR, STUCK_MOVE = (
@@ -287,6 +292,16 @@ def read_inputs():
         return set(), False
 
 
+def read_bot():
+    """What hmbot says it's doing (it writes it for tools/radar.py), or None: the bot doesn't run."""
+    try:
+        with open(NOW_FILE) as f:
+            bot = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return bot.get("text") if time.time() - bot.get("time", 0) < BOT_OLD else None
+
+
 def weapon_name(frame):
     return names.get(frame, {}).get("name", f"frame {frame}")
 
@@ -334,11 +349,23 @@ last_space = -math.inf  # when SPACE was held last
 pending = None  # (when, why) - a save waiting for its aftermath
 next_scan = next_map = next_beat = next_dead = 0
 last_sample = None  # --changes
+last_bot = ""  # the bot's last status, without its numbers
 print(
     f"recording ({','.join(sorted(what))})... F9 in the game = save the last {args.keep:g} s, Ctrl+C = end"
 )
+# Ctrl+C only asks to stop: the loop ends after this sample and the file gets saved. (As a KeyboardInterrupt it
+# pops up wherever the loop is - once it got out without saving: a traceback, no "saved ...")
+stop = False
+
+
+def ask_stop(signum, frame):
+    global stop
+    stop = True
+
+
+signal.signal(signal.SIGINT, ask_stop)
 try:
-    while True:
+    while not stop:
         now = time.monotonic()
         events = []
         mem = Shelf(
@@ -443,6 +470,14 @@ try:
             me = find_me_card(mem)
         except OSError:
             me = None  # loading / a new floor: memory is moving
+
+        # what the bot does: an event when it changes ("HUNTING 118 away" -> "HUNTING 116 away" doesn't -
+        # the numbers don't count)
+        bot_text = read_bot()
+        bot_kind = re.sub(r"[-\d.]+", "#", bot_text) if bot_text else None
+        if bot_kind != last_bot:
+            events.append(f"bot: {bot_text}" if bot_text else "bot: not running")
+            last_bot = bot_kind
 
         held, f9 = read_inputs()
         if f9 and not f9_before:
@@ -606,7 +641,8 @@ try:
             rec.save(now, pending[1], state)
             pending = None
         time.sleep(max(0, 1 / args.rate - (time.monotonic() - now)))
-except KeyboardInterrupt:
+finally:
+    # the end (Ctrl+C) - or a crash: the recording is saved either way
     rec.close(
         time.monotonic(), [f"you {spot(last_you)}", f"enemies alive {len(alive)}"]
     )

@@ -62,8 +62,12 @@ def pause(err, eyes, hands, legs, now):
         lockon.reset()
         eyes.still = []
         eyes.empty_guns = []
+        eyes.out_of_reach = []
+        # a restart makes new cards: the walls and doors are elsewhere now
+        eyes.box_cards = []
         eyes.stairs = None
         eyes.car = None
+        eyes.arrow = None
         # (the legs' bumps stay: walk() forgets them on another floor - after a death here they're still true)
         eyes.next_scan = 0
         eyes.next_walls = 0

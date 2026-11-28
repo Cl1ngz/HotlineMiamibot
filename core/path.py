@@ -11,6 +11,10 @@ SHIFT = CELL / 2
 MAX_CELLS = 5000  # tried this many cells and still no goal = give up (can't get there, or a huge floor)
 STEPS = [(1, 0), (-1, 0), (0, 1), (0, -1)]  # right, left, down, up
 HALF = 8  # you're 16x16, so your middle stays 8 away from every box
+# the way stays in the box around the floor's walls, this many cells wider (round a building, to a car by it).
+# Without it the gunmen's cells sent the search round the OUTSIDE of the building: 5000 cells, ~17 ms, and
+# no way found at all
+AREA_MARGIN = 3
 
 
 def cell_of(xy):
@@ -43,14 +47,29 @@ def blocked_cells(boxes):
     return blocked
 
 
+def area_of(points):
+    """(left, top, right, bottom) in cells: the box around these points (the walls), AREA_MARGIN cells wider."""
+    cells = [cell_of(point) for point in points]
+    if not cells:
+        return None
+    return (
+        min(x for x, y in cells) - AREA_MARGIN,
+        min(y for x, y in cells) - AREA_MARGIN,
+        max(x for x, y in cells) + AREA_MARGIN,
+        max(y for x, y in cells) + AREA_MARGIN,
+    )
+
+
 def guess(cell, goal_cell):
     """Steps to the goal if there were no walls - never more than the real way."""
     return abs(cell[0] - goal_cell[0]) + abs(cell[1] - goal_cell[1])
 
 
-def find_path(start, goal, blocked, max_cells=MAX_CELLS):
+def find_path(start, goal, blocked, max_cells=MAX_CELLS, costly=(), extra=0, area=None):
     """The shortest way from start to goal around blocked cells, as points to walk through.
     A*: the cells that look closest to the goal go first, so on open floor it goes almost straight there.
+    costly: cells that count as 1 + extra steps (a gunman sees them) - a longer way round them can win.
+    area: only cells in this box (area_of) - and where you and the goal are.
     Never None: can't get to the goal -> the way to the cell closest to it."""
     start_cell, goal_cell = cell_of(start), cell_of(goal)
     if start_cell in blocked:
@@ -64,6 +83,12 @@ def find_path(start, goal, blocked, max_cells=MAX_CELLS):
         free = [cell for cell in around if cell not in blocked]
         if free:
             start_cell = min(free, key=lambda c: math.dist(middle(c), start))
+    if area is not None:
+        # the floor's box, wide enough for you and the goal too (a car can stand off it)
+        left = min(area[0], start_cell[0], goal_cell[0])
+        top = min(area[1], start_cell[1], goal_cell[1])
+        right = max(area[2], start_cell[0], goal_cell[0])
+        bottom = max(area[3], start_cell[1], goal_cell[1])
     came_from = {start_cell: None}  # cell -> the cell we came from
     steps_to = {start_cell: 0}  # cell -> fewest steps from the start so far
     # cells to try as (steps + guess, steps, cell) - heapq gives the smallest first
@@ -84,11 +109,16 @@ def find_path(start, goal, blocked, max_cells=MAX_CELLS):
             # the goal can be in a blocked cell (a weapon by a wall) - go there anyway
             if nxt in blocked and nxt != goal_cell:
                 continue
-            if nxt in steps_to and steps_to[nxt] <= steps + 1:
+            if area is not None and not (
+                left <= nxt[0] <= right and top <= nxt[1] <= bottom
+            ):
+                continue  # outside the floor
+            cost = steps + 1 + (extra if nxt in costly else 0)
+            if nxt in steps_to and steps_to[nxt] <= cost:
                 continue  # we know a way there that's as short already
-            steps_to[nxt] = steps + 1
+            steps_to[nxt] = cost
             came_from[nxt] = here
-            heapq.heappush(todo, (steps + 1 + guess(nxt, goal_cell), steps + 1, nxt))
+            heapq.heappush(todo, (cost + guess(nxt, goal_cell), cost, nxt))
 
     # goal reached -> the way to it, else -> the way to the closest cell
     end = goal_cell if goal_cell in came_from else best

@@ -1,15 +1,26 @@
 # https://github.com/Cl1ngz/HotlineMiamibot
 # bot/see.py - see(): everything the bot needs from the game into Eyes, once a frame
 import math
+from collections import Counter
 
 from core import lockon
+from core.danger import line_rows, seen_cells
 from core.enemies import find_me_card, is_enemy, shelf_cards
 from core.memory import X_OFF, Y_OFF, read_double, read_kind, table_cards, where
-from core.path import blocked_cells
+from core.path import area_of, blocked_cells, cell_of
 from core.scenes import scene_id
 from core.shelf import Shelf
 from core.stairs import find_car, find_stairs
-from core.walls import WALL, crosses_box, door_boxes, real_walls, wall_lines
+from core.walls import (
+    WALL,
+    box_cards,
+    crosses_box,
+    door_boxes,
+    pane_lines,
+    real_walls,
+    wall_lines,
+    window_boxes,
+)
 from core.weapons import (
     enemy_gun,
     find_goals,
@@ -26,6 +37,9 @@ SCAN_EVERY = 0.25  # the slow part: enemies, weapons, stairs, the car
 WALLS_EVERY = 2.0  # walls, sofas and fake doors never move
 # card +0x10 of a knocked out enemy (0x12b = the one by the dumpster, with the red arrow over him)
 KNOCKED = (0x16, 0x12B)
+# card +0x14 of an enemy sitting (rule 2): his weapon shows only when he gets up - and then he shoots within ~0.4 s
+# if it's a gun (level 3: 8 deaths to one man by the TV), so the bot counts every sitter as one
+SITTING = 0xA6
 # an execution takes 1 s and an enemy runs ~180 in that time: no SPACE while someone stands closer
 EXEC_SAFE = 200
 # a standing enemy this close: aim at the NEAREST one (of two running at you, the first one there gets hit first)
@@ -40,6 +54,9 @@ ARRIVAL_NEAR = 64
 LANDS_IN = 2.0
 SAME_SPOT = 10  # a gun this close to where our empty one lies is that one
 JUMP = 100  # you moved this far in one frame: a new floor, or the floor again after a death
+# the arrow isn't found in some frames (the logs: to the arrow, to the stairs, to the arrow... every second):
+# keep where it pointed this long
+ARROW_KEEP = 2.0
 # someone dropped out of the enemies: his NEW card can be on the shelf only - look at all of it this long
 RESCAN_FOR = 0.2
 # nobody left that we know of: look this many cards around the table, not the usual AROUND (64) - after a
@@ -68,6 +85,8 @@ def sort_weapons(eyes, floor, now):
     eyes.floor_guns = guns
     eyes.weapons = []
     for x, y, frame in floor:
+        if any(math.dist((x, y), xy) < SAME_SPOT for xy in eyes.out_of_reach):
+            continue  # walk() pushed at it and couldn't get there (it lies on a counter, in a wall's edge)
         info = game.names.get(frame, {})
         if info.get("kind") == "melee":
             eyes.weapons.append((x, y, info.get("rank", 0)))
@@ -103,25 +122,41 @@ def see(eyes, now):
         if wall_cards != eyes.wall_cards:
             eyes.wall_cards = wall_cards
             eyes.next_walls = 0
+            # another floor, maybe: look for its walls and doors again
+            eyes.box_cards = []
         if now >= eyes.next_walls:
-            # every wall and sofa once, as (xy, box) - a new floor name = you just came. From the shelf WIDE
-            # around the table: at the end of a level the table moves away and the usual window held only
-            # half the walls (63 of 115 by the metro car - the way went through the holes)
-            around = shelf_cards(shelf, records, WIDE)
-            walls = real_walls(shelf, records, around)
+            # which cards are walls and doors: the slow search (~15 ms) over the shelf WIDE around the table,
+            # once a floor - at the end of a level the table moves away and the usual window held only half
+            # the walls (63 of 115 by the metro car). Every WALLS_EVERY only those cards are read (~0.2 ms)
+            if not eyes.box_cards:
+                eyes.box_cards = box_cards(shelf, shelf_cards(shelf, records, WIDE))
+            # every wall and sofa once, as (xy, box) - a new floor name = you just came
+            walls = real_walls(shelf, records, eyes.box_cards)
             scene = scene_id(walls)
             if scene != eyes.scene:
                 eyes.arrived_at = now
                 eyes.empty_guns = []
+                eyes.out_of_reach = []
+                eyes.arrow = None  # the last floor's arrow
             eyes.scene = scene
             # lines you can't see through, every door (real or fake - pushing tells, walk() does it),
-            # cells you can't stand in (walls + the doors we know never open here)
+            # cells you can't stand in (walls + glass + the doors we know never open here). Glass isn't in the
+            # lines: you see and shoot through it
             eyes.lines = wall_lines([xy for xy, box in walls])
-            eyes.doors = door_boxes(shelf, around)
-            boxes = [box for xy, box in walls] + [
-                tuple(box) for box in game.fake_doors.get(scene, [])
-            ]
-            eyes.blocked = blocked_cells(boxes)
+            eyes.area = area_of([xy for xy, box in walls])  # the box the ways stay in
+            eyes.doors = door_boxes(shelf, eyes.box_cards)
+            windows = window_boxes(shelf, eyes.box_cards)
+            # what the gunmen can't see through: walls AND glass (you shoot through glass, they don't)
+            eyes.line_rows = line_rows(eyes.lines + pane_lines(windows))
+            boxes = (
+                [box for xy, box in walls]
+                + windows
+                + [tuple(box) for box in game.fake_doors.get(scene, [])]
+            )
+            blocked = blocked_cells(boxes)
+            if blocked != eyes.blocked:
+                eyes.sight = {}  # other walls or glass: what the gunmen see, again
+            eyes.blocked = blocked
             eyes.next_walls = now + WALLS_EVERY
         # stairs lit right after you came, right next to you = the ones you came by; when they go off and
         # light up again, the floor is done
@@ -190,14 +225,42 @@ def see(eyes, now):
         for card, xy in eyes.threats.items()
         if math.dist(xy, eyes.you) < EXEC_SAFE
     }
-    # the standing ones you see with a gun (his picture shows it) - they shoot you from afar
+    # everyone who can shoot you, seen or behind a wall: standing with a gun, or sitting (weapon unknown)
+    eyes.hidden = where(shelf, eyes.still)
+    eyes.shooters, eyes.sitters = {}, {}
+    for card, xy in eyes.hidden.items():
+        if read_kind(shelf, card, 0, 0x14) == SITTING:
+            eyes.sitters[card] = xy
+        elif read_kind(shelf, card, 0, 0x10) not in KNOCKED and enemy_gun(
+            read_kind(shelf, card, 0, 0xA0), game.names
+        ):
+            eyes.shooters[card] = xy
+    # the danger map: what each of them sees (again only when he stepped into another cell)
+    sight = {}
+    changed = len(eyes.shooters) + len(eyes.sitters) != len(eyes.sight)  # one died
+    for card, xy in {**eyes.shooters, **eyes.sitters}.items():
+        old = eyes.sight.get(card)
+        if old is not None and old[0] == cell_of(xy):
+            sight[card] = old
+        else:
+            sight[card] = (cell_of(xy), seen_cells(xy, eyes.line_rows, eyes.blocked))
+            changed = True
+    eyes.sight = sight
+    if changed:
+        # the cells somebody sees, and the cells two or more see (a gun shoots one of them first, not two)
+        seen_by = Counter(cell for his_cell, cells in sight.values() for cell in cells)
+        eyes.fire = set(seen_by)
+        eyes.crossfire = {cell for cell, men in seen_by.items() if men > 1}
+    # the standing ones you see with a gun (his picture shows it) who see you too - not through glass: they
+    # shoot you from afar (one behind glass you shoot, he doesn't - the bot leaves him for later)
     eyes.gunmen = {
         card: xy
         for card, xy in eyes.threats.items()
-        if enemy_gun(read_kind(shelf, card, 0, 0xA0), game.names)
+        if card in eyes.shooters and cell_of(eyes.you) in sight[card][1]
     }
     # who to aim at: someone standing close -> the nearest one, else the dangerous ones, else everyone you see
-    # (an empty dict counts as False). A gun in hand: the gunmen first (the others have to walk up to you)
+    # (an empty dict counts as False). The gunmen first, gun in hand or not (with one: shoot them first,
+    # without: decide() throws at them or hides - walking at them is a bullet)
     near = {
         card: xy
         for card, xy in eyes.threats.items()
@@ -208,7 +271,7 @@ def see(eyes, now):
         for card, xy in near.items()
         if card not in eyes.gunmen
     )
-    if eyes.gun and eyes.ammo != 0 and eyes.gunmen and not melee_close:
+    if eyes.gunmen and not melee_close:
         pick = eyes.gunmen
     elif near:
         nearest = min(near, key=lambda card: math.dist(near[card], eyes.you))
@@ -240,6 +303,9 @@ def see(eyes, now):
                     / (now - eyes.last_seen_at)
                 )
         eyes.last_spots, eyes.last_seen_at = dict(eyes.spots), now
-    eyes.hidden = where(shelf, eyes.still)
     # the red arrow only when nobody is left (not needed in a fight, and it costs a little every frame)
-    eyes.arrow = None if eyes.still else game.watch.update(now)
+    arrow = None if eyes.still else game.watch.update(now)
+    if arrow is not None:
+        eyes.arrow, eyes.arrow_seen_at = arrow, now
+    elif eyes.still or now - eyes.arrow_seen_at > ARROW_KEEP:
+        eyes.arrow = None
